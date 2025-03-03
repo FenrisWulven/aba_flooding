@@ -2,6 +2,8 @@
 
 Adv Business Analytics Exam Project 2025
 
+Flooding Prediction in Denmark based on rain, terrain topology and soil types.
+
 ## Project structure
 
 The directory structure of the project looks like this:
