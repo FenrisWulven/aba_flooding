@@ -7,7 +7,6 @@ from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor
 from lightning.pytorch.loggers import TensorBoardLogger
 import numpy as np
 import pandas as pd
-import torch
 
 from pytorch_forecasting import Baseline, TemporalFusionTransformer, TimeSeriesDataSet
 from pytorch_forecasting.data import GroupNormalizer
@@ -43,9 +42,9 @@ def train():
     data["weekday"] = data["Dato"].dt.weekday.astype(str)
     data["place_id"] = "Roskilde"
 
-    max_prediction_length = 24
     max_encoder_length = 24
-    training_cutoff = data["time_idx"].max() * 0.8
+    
+    training_cutoff = data["time_idx"].max() - 24 * 7  # keep last week for validation
 
     training = TimeSeriesDataSet(
         data[lambda x: x.time_idx <= training_cutoff],
@@ -55,7 +54,7 @@ def train():
         min_encoder_length=max_encoder_length // 2,  # allow predictions without history
         max_encoder_length=max_encoder_length,
         min_prediction_length=1,
-        max_prediction_length=max_prediction_length,
+        max_prediction_length=24 * 7,
         static_categoricals=["place_id"],
         time_varying_known_categoricals=["hour", "weekday"],
         target_normalizer=GroupNormalizer(
@@ -155,6 +154,12 @@ def train():
         val_dataloader, return_y=True, trainer_kwargs=dict(accelerator="cpu")
     )
     print(MAE()(predictions.output, predictions.y))
+
+    plt.plot(predictions.y[0].numpy(), label="actual")
+    plt.plot(predictions.output[0].numpy(), label="forecast")
+    plt.legend()
+    plt.savefig("forecast.png")
+    plt.close()
 
     # raw predictions are a dictionary from which all kind of information including quantiles can be extracted
     raw_predictions = best_tft.predict(
