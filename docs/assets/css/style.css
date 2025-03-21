@@ -1,0 +1,121 @@
+/* Base styles */
+:root {
+    --primary-color: #0066cc;
+    --secondary-color: #f8f9fa;
+    --text-color: #333;
+    --light-text: #666;
+    --border-color: #ddd;
+    --success-color: #28a745;
+    --warning-color: #ffc107;
+    --danger-color: #dc3545;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    line-height: 1.6;
+    color: var(--text-color);
+    background-color: #fff;
+}
+
+.container {
+    width: 90%;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 15px;
+}
+
+/* Header styles */
+header {
+    background-color: var(--primary-color);
+    color: white;
+    padding: 2rem 0;
+    margin-bottom: 2rem;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+header h1 {
+    margin-bottom: 0.5rem;
+}
+
+.subtitle {
+    font-size: 1.2rem;
+    opacity: 0.9;
+}
+
+/* Section styles */
+section {
+    margin-bottom: 3rem;
+    background-color: var(--secondary-color);
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+h2 {
+    color: var(--primary-color);
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+p, ul, ol {
+    margin-bottom: 1.5rem;
+}
+
+ul, ol {
+    padding-left: 1.5rem;
+}
+
+li {
+    margin-bottom: 0.5rem;
+}
+
+/* Visualization container */
+#map-container {
+    height: 600px;
+    width: 100%;
+    background-color: #f0f0f0;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-top: 1.5rem;
+}
+
+#visualization-frame {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+/* Footer styles */
+footer {
+    background-color: var(--primary-color);
+    color: white;
+    padding: 1.5rem 0;
+    text-align: center;
+    margin-top: 3rem;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    header {
+        padding: 1.5rem 0;
+    }
+    
+    h1 {
+        font-size: 1.8rem;
+    }
+    
+    #map-container {
+        height: 400px;
+    }
+    
+    section {
+        padding: 1.5rem;
+    }
+}

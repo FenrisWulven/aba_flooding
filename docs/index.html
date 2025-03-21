@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Denmark Flooding Risk Analysis</title>
+    <link rel="stylesheet" href="../assets/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/deck.gl@8.8.0/dist.min.js"></script>
+    <script src="https://api.tiles.mapbox.com/mapbox-gl-js/v1.13.0/mapbox-gl.js"></script>
+    <link href="https://api.tiles.mapbox.com/mapbox-gl-js/v1.13.0/mapbox-gl.css" rel="stylesheet" />
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>Denmark Flooding Risk Analysis</h1>
+            <p class="subtitle">Advanced Business Analytics Project</p>
+        </div>
+    </header>
+    
+    <main class="container">
+        <section id="project-overview">
+            <h2>Project Overview</h2>
+            <p>
+                This project analyzes terrain data across Denmark to assess flooding risk areas. 
+                Using geospatial analysis and machine learning techniques, we identify regions 
+                that are most vulnerable to flooding based on elevation, terrain characteristics, 
+                and proximity to water bodies.
+            </p>
+        </section>
+
+        <section id="visualization">
+            <h2>Interactive Terrain Visualization</h2>
+            <p>
+                The 3D visualization below shows the topography of Denmark. Areas with lower elevation 
+                (potential flooding zones) are highlighted. You can interact with the map by:
+            </p>
+            <ul>
+                <li>Rotating: Hold right mouse button and drag</li>
+                <li>Panning: Hold left mouse button and drag</li>
+                <li>Zooming: Scroll with mouse wheel</li>
+                <li>Tilting: Hold middle mouse button and drag</li>
+            </ul>
+            
+            <div id="map-container">
+                <iframe id="visualization-frame" src="../visualizations/terrain_visualization.html" frameborder="0"></iframe>
+            </div>
+        </section>
+
+        <section id="methodology">
+            <h2>Methodology</h2>
+            <p>
+                Our analysis involved several key steps:
+            </p>
+            <ol>
+                <li><strong>Data Collection:</strong> Terrain elevation data from the Danish Geodata Agency</li>
+                <li><strong>Data Processing:</strong> Cleaning and preparing geospatial datasets using GeoPandas</li>
+                <li><strong>Feature Engineering:</strong> Extracting relevant features from terrain geometry</li>
+                <li><strong>Visualization:</strong> Creating interactive 3D models using PyDeck</li>
+            </ol>
+        </section>
+
+        <section id="results">
+            <h2>Key Findings</h2>
+            <p>
+                The analysis revealed several insights about potential flooding risks in Denmark:
+            </p>
+            <ul>
+                <li>Low-lying coastal areas show the highest vulnerability to sea-level rise</li>
+                <li>Areas with specific terrain characteristics have increased flood susceptibility</li>
+                <li>Combining terrain models with precipitation data improves prediction accuracy</li>
+            </ul>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>Advanced Business Analytics Project | Technical University of Denmark</p>
+        </div>
+    </footer>
+</body>
+</html>

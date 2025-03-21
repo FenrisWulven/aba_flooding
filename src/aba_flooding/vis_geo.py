@@ -75,7 +75,7 @@ def gdf_to_pydeck(gdf):
     return {"type": "FeatureCollection", "features": features}
 
 # Visualize using Pydeck
-def visualize_terrain(file_path):
+def visualize_terrain(file_path, output_dir=None):
     gdf = load_terrain_data(file_path)
     print(f"Data loaded from {file_path}")
     print(f"Number of features: {len(gdf)}")
@@ -142,6 +142,17 @@ def visualize_terrain(file_path):
         bearing=0
     )
     
+    # Set output directory for HTML
+    if output_dir is None:
+        # Default to the docs/visualizations directory in the project root
+        current_file = Path(__file__)
+        project_root = current_file.parent.parent.parent
+        output_dir = project_root / "docs" / "visualizations"
+    
+    # Create the output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Create the deck
     deck = pdk.Deck(
         layers=[layer], 
         initial_view_state=view_state,
@@ -149,25 +160,32 @@ def visualize_terrain(file_path):
         tooltip={"text": "Properties: {properties}"}
     )
     
+    # Save as HTML in the output directory
+    html_file = os.path.join(output_dir, "terrain_visualization.html")
+    deck.to_html(html_file, iframe_width="100%", iframe_height="600")
+    print(f"Visualization saved to {html_file}")
+    
     return deck
 
 # Run visualization
 if __name__ == "__main__":
     terrain_file = "Terrain.geojson"
-    deck = visualize_terrain(terrain_file)
     
-    # Save to HTML
-    html_file = "terrain_visualization.html"
-    deck.to_html(html_file)
-    print(f"Visualization saved to {html_file}")
+    # Create docs/visualizations directory in project root
+    current_file = Path(__file__)
+    project_root = current_file.parent.parent.parent
+    visualizations_dir = project_root / "docs" / "visualizations"
+    
+    deck = visualize_terrain(terrain_file, visualizations_dir)
+    
+    # Save to HTML in the docs/visualizations directory
+    html_file = os.path.join(visualizations_dir, "terrain_visualization.html")
+    
+    # Print GitHub Pages URL
+    print("\nYour visualization will be available at:")
+    print(f"https://[your-username].github.io/aba_flooding/visualizations/terrain_visualization.html")
     
     # Try to show in browser
     import webbrowser
     webbrowser.open(html_file)
-    
-    # # For Jupyter notebooks
-    # try:
-    #     display(deck)
-    # except NameError:
-    #     print("Not in a notebook environment. View the saved HTML file instead.")
 
