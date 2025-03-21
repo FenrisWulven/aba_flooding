@@ -17,13 +17,19 @@ classifiers = [
 ]
 readme = "README.md"
 requires-python = ">=3.12"
-dynamic = ["dependencies", "optional-dependencies"]
+#dynamic = ["dependencies", "optional-dependencies"]
 
-[tool.setuptools.dynamic]
-dependencies = {file = ["requirements.txt"]}
+dependencies = [
+  "ipykernel>=6.29.5",
+  "ipython>=9.0.2",
+  "pydeck",
+]
 
-[tool.setuptools.dynamic.optional-dependencies]
-dev = {file = ['requirements_dev.txt']}
+#[tool.setuptools.dynamic]
+#dependencies = {file = ["requirements.txt"]}
+
+#[tool.setuptools.dynamic.optional-dependencies]
+#dev = {file = ['requirements_dev.txt']}
 
 [tool.ruff]
 line-length = 120
