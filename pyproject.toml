@@ -20,9 +20,12 @@ requires-python = ">=3.12"
 #dynamic = ["dependencies", "optional-dependencies"]
 
 dependencies = [
+  "geopandas>=1.0.1",
   "ipykernel>=6.29.5",
   "ipython>=9.0.2",
   "pydeck",
+  "pyproj>=3.7.1",
+  "scikit-learn>=1.6.1",
 ]
 
 #[tool.setuptools.dynamic]

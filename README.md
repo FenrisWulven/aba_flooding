@@ -4,6 +4,10 @@ Adv Business Analytics Exam Project 2025
 
 Flooding Prediction in Denmark based on rain, terrain topology and soil types.
 
+The project homepage can be found [here](https://fenriswulven.github.io/aba_flooding/).
+It is an interactive website that explains the project and its results with interactive geographical maps.
+
+
 ## Project structure
 
 The directory structure of the project looks like this:
