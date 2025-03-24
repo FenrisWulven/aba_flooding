@@ -26,6 +26,10 @@ dependencies = [
   "pydeck",
   "pyproj>=3.7.1",
   "scikit-learn>=1.6.1",
+  "torch>=2.6.0",
+  "torchaudio>=2.6.0",
+  "torchvision>=0.21.0",
+  "typer>=0.15.2",
 ]
 
 #[tool.setuptools.dynamic]
@@ -33,6 +37,23 @@ dependencies = [
 
 #[tool.setuptools.dynamic.optional-dependencies]
 #dev = {file = ['requirements_dev.txt']}
+
+[tool.uv.pip]
+extra-index-url = ["https://download.pytorch.org/whl/cu124"]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cu124", marker = "sys_platform == 'win32'" },
+]
+torchvision = [
+  { index = "pytorch-cu124", marker = "sys_platform == 'win32'" },
+]
 
 [tool.ruff]
 line-length = 120
