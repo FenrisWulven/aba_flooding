@@ -80,6 +80,8 @@ def init_map():
     # Load the terrain data
     print("Loading terrain data...")
     terrain_data = load_terrain_data("Terrain.geojson")
+    print(f"Loaded terrain data: {len(terrain_data)} features")
+    print(f"Sample terrain geometry: {terrain_data.geometry.iloc[0] if len(terrain_data) > 0 else 'No data'}")
     
     # Check CRS and reproject if needed 
     if terrain_data.crs is None:
@@ -136,6 +138,7 @@ def init_map():
     hover = HoverTool(tooltips=[
         ("Flood Probability", "@flood_probability{0.00%}"),
         ("Elevation", "@elevation"),
+        ("jordart", "@jordart")
     ])
     p.add_tools(hover)
     
@@ -164,7 +167,7 @@ def init_map():
     
     # Prepare layer control checkbox
     layer_names = ["Terrain", "Sediment"]
-    active_layers = [0, 1]  # Both terrain and sediment are on by default
+    active_layers = [0,1]  # Both terrain and sediment are off by default
     
     # Process flood risk layer
     flood_layer = None

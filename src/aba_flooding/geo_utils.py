@@ -13,70 +13,87 @@ class SurvivalModel:
         return self.model.predict_proba(X)
 
 def survival_layer(terrain_geojson, sediment_geojson, year, model=None, terrain_df=None, sediment_df=None, preserve_topology=False):
-    """Ultra-simplified function that just returns a tiny subset of terrain data with random flood values"""
-    print("Creating minimal flood visualization...")
+    """Creates a flood risk visualization layer using sediment data as primary and terrain as secondary feature."""
+    print("Creating flood visualization layer...")
     
-    if terrain_df is None:
-        print("No terrain data provided")
-        return GeoJSONDataSource(geojson='{"type":"FeatureCollection","features":[]}')
-    
-    # Get a small sample with minimal processing
-    sample_size = 500  # Even smaller sample
-    print(f"Taking sample of {sample_size} features")
+    if sediment_df is None or len(sediment_df) == 0:
+        print("No valid sediment data provided")
+        return None
     
     try:
-        # Make a copy to avoid modifying the original
-        terrain_sample = terrain_df.copy()
+        # Make a clean copy of the sediment data
+        flood_data = sediment_df.copy()
         
-        # Take a small random sample
-        if len(terrain_sample) > sample_size:
-            terrain_sample = terrain_sample.sample(sample_size, random_state=42)
+        # Sample if the dataset is too large (for performance)
+        sample_size = len(flood_data)
+        if len(flood_data) > sample_size:
+            # Use spatial sampling to maintain geographic distribution
+            flood_data = flood_data.sample(sample_size, random_state=42)
         
-        # Verify we have data
-        print(f"Sample contains {len(terrain_sample)} features")
+        print(f"Processing {len(flood_data)} sediment features")
         
-        # Ensure geometry is valid
-        terrain_sample = terrain_sample[~terrain_sample.geometry.is_empty]
-        print(f"After removing empty geometries: {len(terrain_sample)} features")
+        # Add synthetic flood probability data
+        # This will be replaced with a real model in the future
+        flood_data["flood_probability"] = np.random.beta(2, 5, size=len(flood_data))
         
-        # Add random flood probabilities
-        terrain_sample["flood_probability"] = np.random.rand(len(terrain_sample))
-        
-        # Add a default elevation if it doesn't exist
-        if 'elevation' not in terrain_sample.columns:
-            print("Adding default elevation column")
-            terrain_sample['elevation'] = np.random.uniform(0, 10, len(terrain_sample))
-        
-        # Check if we have any data left
-        if len(terrain_sample) == 0:
-            print("No valid features remain!")
-            return GeoJSONDataSource(geojson='{"type":"FeatureCollection","features":[]}')
+        # Incorporate terrain data if available
+        if terrain_df is not None and len(terrain_df) > 0:
+            print("Incorporating terrain data as secondary feature...")
+            # Here you might join or merge with terrain data
+            # This is a placeholder - implement specific join logic based on your needs
             
-        # Convert directly to GeoJSON
-        print("Converting to GeoJSON...")
-        result_geojson = terrain_sample.to_json()
+            # Add elevation from terrain if missing in sediment data
+            if 'elevation' not in flood_data.columns and 'elevation' in terrain_df.columns:
+                # This is simplified - in practice you would need a spatial join
+                flood_data['elevation'] = terrain_df['elevation'].mean()
         
-        # Verify GeoJSON is not empty
-        json_obj = json.loads(result_geojson)
-        feature_count = len(json_obj.get('features', []))
+        # Add default elevation if missing
+        if 'elevation' not in flood_data.columns:
+            if 'z' in flood_data.columns:
+                flood_data['elevation'] = flood_data['z']
+            else:
+                flood_data['elevation'] = 2.0  # Default value
+        
+        # Ensure all required columns exist
+        required_columns = ['geometry', 'flood_probability']
+        for col in required_columns:
+            if col not in flood_data.columns:
+                print(f"Missing required column: {col}")
+                return None
+        
+        # Convert any datetime columns to strings to avoid JSON serialization errors
+        for col in flood_data.select_dtypes(include=['datetime64[ns]']).columns:
+            flood_data[col] = flood_data[col].astype(str)
+        
+        # Also check for individual Timestamp objects in the DataFrame
+        for col in flood_data.columns:
+            if pd.api.types.is_object_dtype(flood_data[col]):
+                # Check if column contains any Timestamp objects
+                if flood_data[col].apply(lambda x: isinstance(x, pd.Timestamp)).any():
+                    flood_data[col] = flood_data[col].apply(lambda x: str(x) if isinstance(x, pd.Timestamp) else x)
+        
+        # Convert to GeoJSON for Bokeh
+        print("Converting to GeoJSON source...")
+        flood_json = flood_data.to_json()
+        
+        # Validate the GeoJSON
+        json_data = json.loads(flood_json)
+        feature_count = len(json_data.get('features', []))
         print(f"GeoJSON contains {feature_count} features")
         
         if feature_count == 0:
             print("Warning: GeoJSON has no features!")
+            return None
             
-        # Create the GeoJSONDataSource
-        source = GeoJSONDataSource(geojson=result_geojson)
-        
-        # Debug using the geojson property instead of data
-        print(f"Source has geojson: {source.geojson is not None and len(source.geojson) > 0}")
-        
+        # Create the final data source
+        source = GeoJSONDataSource(geojson=flood_json)
         return source
         
     except Exception as e:
-        print(f"Error in creating flood layer: {e}")
+        print(f"Error creating flood layer: {str(e)}")
         import traceback
         traceback.print_exc()
-        return GeoJSONDataSource(geojson='{"type":"FeatureCollection","features":[]}')
+        return None
 
 def simple_flood_model(data, year):
     return np.random.rand(len(data))
