@@ -17,6 +17,12 @@ from bokeh.layouts import column
 from pyproj import Transformer
 from shapely.ops import transform
 
+# QUick idea:
+# Gets the data from the data folder and loads it into the map
+# creates a checkbox for terrain and sediment.
+# will create a slider that switches between layers of survival predictions (done in geo_utils)
+# simple! voila! it doesnt have data for all of denmark for some god forsaken reason.
+
 def get_data_dir():
     """Return path to the raw data directory."""
     current_file = Path(__file__)

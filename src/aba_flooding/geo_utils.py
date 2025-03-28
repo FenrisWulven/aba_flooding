@@ -5,12 +5,7 @@ import numpy as np
 from bokeh.models import GeoJSONDataSource, LinearColorMapper
 from bokeh.palettes import Viridis256
 
-class SurvivalModel:
-    def __init__(self, model):
-        self.model = model
-    
-    def predict_proba(self, X):
-        return self.model.predict_proba(X)
+# WIll take the a model and geodata and apply the survival function on the data so it is in geojson format for the map
 
 def survival_layer(terrain_geojson, sediment_geojson, year, model=None, terrain_df=None, sediment_df=None, preserve_topology=False):
     """Creates a flood risk visualization layer using sediment data as primary and terrain as secondary feature."""
@@ -34,8 +29,17 @@ def survival_layer(terrain_geojson, sediment_geojson, year, model=None, terrain_
         
         # Add synthetic flood probability data
         # This will be replaced with a real model in the future
-        flood_data["flood_probability"] = np.random.beta(2, 5, size=len(flood_data))
-        
+        if model is not None:
+            try:
+                flood_data["flood_probability"] = model.predict_flood_risk(flood_data, years=year)
+            except Exception as e:
+                print(f"Error using prediction model: {str(e)}")
+                # Fallback to random values
+                flood_data["flood_probability"] = np.random.beta(2, 5, size=len(flood_data))
+        else:
+            # Use random values if no model is provided
+            flood_data["flood_probability"] = np.random.beta(2, 5, size=len(flood_data))
+                
         # Incorporate terrain data if available
         if terrain_df is not None and len(terrain_df) > 0:
             print("Incorporating terrain data as secondary feature...")
