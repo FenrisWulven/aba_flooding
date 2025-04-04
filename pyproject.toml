@@ -22,7 +22,10 @@ requires-python = ">=3.12"
 dependencies = [
   "ipykernel>=6.29.5",
   "ipython>=9.0.2",
+  "lifelines>=0.30.0",
+  "pycox>=0.3.0",
   "pydeck",
+  "sklearn-pandas>=2.2.0",
 ]
 
 #[tool.setuptools.dynamic]
