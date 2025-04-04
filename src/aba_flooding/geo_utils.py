@@ -4,8 +4,73 @@ import pandas as pd
 import numpy as np
 from bokeh.models import GeoJSONDataSource, LinearColorMapper
 from bokeh.palettes import Viridis256
+import geopandas as gpd
+import os
+from pathlib import Path
+from pyproj import Transformer
+from shapely.ops import transform
 
 # WIll take the a model and geodata and apply the survival function on the data so it is in geojson format for the map
+
+def get_data_dir():
+    """Return path to the raw data directory."""
+    current_file = Path(__file__)
+    project_root = current_file.parent.parent.parent
+    data_dir = project_root / "data" / "raw"
+    return data_dir
+
+def load_geojson(file_name):
+    """Load a GeoJSON file from the data directory."""
+    data_dir = get_data_dir()
+    file_path = os.path.join(data_dir, file_name)
+    return gpd.read_file(file_path)
+
+def load_gpkg(file_name, layer=None):
+    """Load a GeoPackage file from the data directory, with optional layer name."""
+    data_dir = get_data_dir()
+    file_path = os.path.join(data_dir, file_name)
+    if layer:
+        return gpd.read_file(file_path, layer=layer)
+    return gpd.read_file(file_path)
+
+def load_terrain_data(file_name):
+    """Load terrain data from GeoJSON or GPKG file."""
+    if file_name.endswith('.geojson'):
+        return load_geojson(file_name)
+    elif file_name.endswith('.gpkg'):
+        return load_gpkg(file_name)
+    else:
+        raise ValueError(f"Unsupported file format for {file_name}")
+
+def wgs84_to_web_mercator(df):
+    """Convert GeoDataFrame from WGS84 to Web Mercator projection."""
+    transformer = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+    
+    # Create new geometry column with transformed coordinates
+    df = df.copy()
+    df['geometry'] = df['geometry'].apply(
+        lambda geom: transform(lambda x, y: transformer.transform(x, y), geom)
+    )
+    return df
+
+def gdf_to_geojson(gdf):
+    """Convert GeoDataFrame to GeoJSON format for Bokeh."""
+    # Make a copy to avoid modifying the original
+    gdf = gdf.copy()
+    
+    # Convert any datetime columns to strings
+    for col in gdf.select_dtypes(include=['datetime64[ns]']).columns:
+        gdf[col] = gdf[col].astype(str)
+    
+    # Also check for individual Timestamp objects in the DataFrame
+    for col in gdf.columns:
+        if gdf[col].apply(lambda x: isinstance(x, pd.Timestamp)).any():
+            gdf[col] = gdf[col].apply(lambda x: str(x) if isinstance(x, pd.Timestamp) else x)
+    
+    # Convert to GeoJSON
+    return json.dumps(json.loads(gdf.to_json()))
+
+
 
 def survival_layer(terrain_geojson, sediment_geojson, year, model=None, terrain_df=None, sediment_df=None, preserve_topology=False):
     """Creates a flood risk visualization layer using sediment data as primary and terrain as secondary feature."""
