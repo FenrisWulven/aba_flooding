@@ -1,5 +1,8 @@
-import src.aba_flooding.model 
+import model as md
 import pandas as pd
+import geopandas as gpd
+import geo_utils as gu
+
 
 # QUick Intro:
 # Goal: 
@@ -7,24 +10,21 @@ import pandas as pd
 # Then create a dict of survival models that correspond to soiltypes.
 # this dict of trained models will be passed to the flood_layer to give it directions for its heatmap.s
 
-def load_process_data(soil_types):
+def load_process_data():
     # TODO
 
-    df = pd.read_csv("Regn2004-2025.csv", sep=";")
+    df = pd.read_csv("data/raw/Regn2004-2025.csv", sep=";")
     df['Dato'] = pd.to_datetime(df['Dato'], format='%d.%m.%Y')
-    df_temp = pd.read_csv("Temperatur 2004-2025.csv", sep=";")
-    df_temp['Dato'] = pd.to_datetime(df_temp['Dato'], format='%d.%m.%Y')
-    df = df.merge(df_temp, on=['Dato', 'Tid'], how='left')
 
     df['Tid'] = df.apply(lambda x: int(x['Tid'].split(':')[0]), axis=1)
     df['datetime'] = df['Dato'] + pd.to_timedelta(df['Tid'], unit='h')
-    absorbtions = {'clay': 0.1, 'sand': 0.1, 'silt': 0.1, 'peat': 0.1, 'loam': 0.1}
+    absorbtions = {'DG - Meltwater gravel': 0.1, 'DS - Meltwater sand': 0.2}
 
     for soil_type in absorbtions.keys():
         df[f'WOG_{soil_type}'] = 0.0
         
         # Apply cumulative calculation using expanding window
-        for soil_type, rate in absorbtions.items():
+        for curr_soil, rate in absorbtions.items():  # Changed variable name
             # Create temporary series for calculation
             wog = pd.Series(0.0, index=df.index)
             
@@ -33,34 +33,33 @@ def load_process_data(soil_types):
                 wog.iloc[i] = max(0, wog.iloc[i-1] * (1 - rate) + df['Nedbor'].iloc[i])
                 
             # Assign back to dataframe
-            df[f'WOG_{soil_type}'] = wog
+            df[f'WOG_{curr_soil}'] = wog  # Use new variable name
 
-    df.dropna(inplace=True)
+        df.dropna(inplace=True)
+        
+        # Rest of code as before
+        df[f"{soil_type}observed"] = (df[f"WOG_{soil_type}"] > 5).astype(int)
+        
 
-    df["is_rain"] = (df["WOG_clay"] > 5).astype(int) # IMPORTANT SHIAT!
+        dry_spells = []
+        current_duration = 0
+        censored = False  # True if the last dry spell was ongoing at the end of the dataset
+        durations = []
 
-    # Compute durations of dry spells
-    dry_spells = []
-    current_duration = 0
-    censored = False  # True if the last dry spell was ongoing at the end of the dataset
-    durations = []
+        for idx, row in df.iterrows():
+            if row[f"{soil_type}observed"] == 0:
+                current_duration += 1
+            else:
+                if current_duration > 0:
+                    dry_spells.append({"duration": current_duration, "observed": 1})
+                    current_duration = 0
+            durations.append(current_duration)
+        # Handle censoring (if the dataset ends with a dry spell)
+        if current_duration > 0:
+            dry_spells.append({"duration": current_duration, "observed": 0})
 
-    for idx, row in df.iterrows():
-        if row["is_rain"] == 0:
-            current_duration += 1
-        else:
-            if current_duration > 0:
-                dry_spells.append({"duration": current_duration, "observed": 1})
-                current_duration = 0
-        durations.append(current_duration)
-    # Handle censoring (if the dataset ends with a dry spell)
-    if current_duration > 0:
-        dry_spells.append({"duration": current_duration, "observed": 0})
-
-    # Convert to DataFrame
-    dry_spell_df = pd.DataFrame(dry_spells)
-
-    df['duration'] = durations
+        df[f'{soil_type}duration'] = durations
+        print("columns: ", df.columns)
 
     return df
 
@@ -69,14 +68,22 @@ def gather_soil_types(sediment_geo_json):
     # TODO
     pass
 
-def train_all_models(df, soiltypes):
-    # Will train a model for eahc soiltype (depending on the availability of data for that soiltype.)
-    survival_models = dict()
-    # TODO
+def train_all_models(soiltypes):
+        # Will train a model for each soiltype (depending on availability of data)
+    df = load_process_data()
 
+    print("Available columns:", df.columns.tolist())
+    
+    # Initialize FloodModel with the correct soil types
+    floodModel = md.FloodModel()
+    floodModel.soil_types = soiltypes  # Make sure FloodModel uses the same soil types
 
+    # Pass the base column names without prefixes
+    floodModel.train(df, duration_column='duration', event_column='observed')
 
-
-
-
+    # load geodata
+    sediment_data = gu.load_terrain_data("Sediment.geojson")
+    sediment_data = floodModel.predict_proba(sediment_data, year=1)
+    
+    return floodModel
 
