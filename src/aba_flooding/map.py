@@ -1,5 +1,6 @@
 import bokeh
 import pandas as pd
+import matplotlib.pyplot as plt
 
 from geo_utils import load_terrain_data, gdf_to_geojson, wgs84_to_web_mercator, load_geojson, load_gpkg, load_terrain_data, gdf_to_geojson
 
@@ -90,21 +91,37 @@ def init_map():
         try:
             # Extract soil types from sediment data
             soil_types = sediment_mercator['sediment'].unique().tolist()
+            print(f"Found soil types in sediment data: {soil_types}")
             
-            # Train FloodModel
+            # Known soil types we have data for
+            known_soil_types = ["DG - Meltwater gravel", "DS - Meltwater sand"]
             
+            # Train FloodModel with all soil types from sediment data
+            # The function will handle missing data internally
             flood_model = train_all_models(soil_types)
             
+            # Plot models for available soil types
+            flood_model.plot_all(save=True)
+
             # Precompute predictions for all years
             sediment_with_predictions = sediment_mercator.copy()
             for year in range(0, 11):
                 sediment_with_predictions = flood_model.predict_proba(sediment_with_predictions, year)
             
+            # Verify predictions columns exist
+            for year in range(0, 11):
+                col_name = f'predictions_{year}'
+                if col_name not in sediment_with_predictions.columns:
+                    print(f"Warning: Column {col_name} not found in data")
+                else:
+                    print(f"Column {col_name} has avg: {sediment_with_predictions[col_name].mean()} and std: {sediment_with_predictions[col_name].std()}")
+                    print(f"Column {col_name} has range: {sediment_with_predictions[col_name].min()}-{sediment_with_predictions[col_name].max()}")
+            
             # Convert to GeoJSON data source
             flood_geojson = gdf_to_geojson(sediment_with_predictions)
             flood_source = GeoJSONDataSource(geojson=flood_geojson)
             
-            # Create color mapper
+            # Create color mapper with initial field name for year 0
             color_mapper = linear_cmap(
                 field_name='predictions_0',
                 palette=Viridis256,
@@ -126,34 +143,95 @@ def init_map():
             color_bar = ColorBar(
                 color_mapper=color_mapper['transform'],
                 location=(0, 0),
-                title="Flood Risk (%)",
+                title="Flood Risk (%) - Year 0",
                 ticker=bokeh.models.BasicTicker(desired_num_ticks=5),
                 formatter=bokeh.models.PrintfTickFormatter(format="%d%%")
             )
             p.add_layout(color_bar, 'right')
             
-            # Set up slider callback to update color field
+            # Create a text div to display the current year
+            from bokeh.models import Div
+            year_display = Div(text="<h3>Showing predictions for Year: 0</h3>", width=300)
+            
+            # Fixed slider callback to properly update the visualization
             year_callback = CustomJS(
-                args=dict(transform=color_mapper['transform'], flood_source=flood_source),
+                args=dict(
+                    flood_layer=flood_layer,  # Pass the actual layer
+                    flood_source=flood_source,
+                    slider=year_slider,
+                    color_bar=color_bar,
+                    year_display=year_display,
+                    mapper=color_mapper  # Pass the entire mapper object
+                ),
                 code="""
-                    const year = cb_obj.value;
-                    transform.field = 'predictions_' + year;
+                    // Get current year from slider
+                    const year = Math.round(slider.value);
+                    console.log('Changing visualization to year:', year);
+                    
+                    // Create the field name for this year's predictions
+                    const field_name = 'predictions_' + year;
+                    
+                    // Need to update the mapper's field name
+                    mapper.field = field_name;
+                    
+                    // Update the layer's glyph
+                    flood_layer.glyph.fill_color = {
+                        ...flood_layer.glyph.fill_color,
+                        field: field_name
+                    };
+                    
+                    // Update the color bar title
+                    color_bar.title = 'Flood Risk (%) - Year ' + year;
+                    
+                    // Update the year display
+                    year_display.text = '<h3>Showing predictions for Year: ' + year + '</h3>';
+                    
+                    // Force a data source change to trigger redraw
                     flood_source.change.emit();
                 """
             )
             year_slider.js_on_change('value', year_callback)
+            
+            # Create a dynamic hover tool that includes the current year's prediction
+            hover = HoverTool(
+                tooltips=[
+                    ("Soil Type", "@sediment"),
+                    ("Elevation", "@elevation{0,0.0}"),
+                    ("Current Year Prediction", "@predictions_0{0.0}%"),
+                    ("5-Year Prediction", "@predictions_5{0.0}%"),
+                    ("10-Year Prediction", "@predictions_10{0.0}%")
+                ]
+            )
+            
+            # Add tooltip for current year (updated by JavaScript)
+            hover_callback = CustomJS(
+                args=dict(hover=hover, slider=year_slider),
+                code="""
+                    // Update the hover tooltip to show the current year's prediction
+                    const year = Math.round(slider.value);
+                    const field = 'predictions_' + year;
+                    
+                    // Update the third tooltip (index 2)
+                    hover.tooltips[2] = ["Year " + year + " Prediction", "@" + field + "{0.0}%"];
+                """
+            )
+            year_slider.js_on_change('value', hover_callback)
+            
+            p.add_tools(hover)
             
         except Exception as e:
             print(f"Error setting up flood predictions: {e}")
             import traceback
             traceback.print_exc()
     
-    # Configure hover tool
+    # Configure hover tool to show the current prediction value based on slider
     hover = HoverTool(
         tooltips=[
-            ("Flood Probability", "@predictions_0%"),
-            ("Soil Type", "@jordart"),
-            ("Elevation", "@elevation")
+            ("Soil Type", "@sediment"),
+            ("Elevation", "@elevation"),
+            ("Flood Risk (Year 0)", "@predictions_0%"),
+            ("Flood Risk (Year 5)", "@predictions_5%"),
+            ("Flood Risk (Year 10)", "@predictions_10%")
         ]
     )
     p.add_tools(hover)
@@ -184,7 +262,11 @@ def init_map():
     checkbox.js_on_change('active', checkbox_callback)
     
     # Assemble layout
-    controls = column(checkbox, year_slider)
+    if 'year_display' in locals():
+        controls = column(year_display, year_slider, checkbox)
+    else:
+        controls = column(year_slider, checkbox)
+        
     layout = column(p, controls)
     p.legend.location = "top_left"
     p.legend.click_policy = "hide"
