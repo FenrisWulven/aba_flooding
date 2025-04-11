@@ -3,14 +3,16 @@ import numpy as np
 import pandas as pd
 import torch
 import torchtuples as tt
-from pycox.models import CoxPH
-from pycox.evaluation import EvalSurv
+
 from sklearn.preprocessing import StandardScaler
 from sklearn_pandas import DataFrameMapper
 import matplotlib.pyplot as plt
 import seaborn as sns
 from datetime import datetime
 import os
+
+from pycox.models import CoxPH
+from pycox.evaluation import EvalSurv
 
 # Load the rainfall dataset
 parent_dir = os.path.dirname(os.path.abspath(__file__))
@@ -30,11 +32,10 @@ df['datetime'] = df['Dato'] + pd.to_timedelta(df['Tid'], unit='h')
 print(f"First rows of datetime: {df['datetime'].iloc[0]}")
 
 # Print type of nedbor and nedborsminutter columns
-# Nedbor is float64 but in 1,5 in mm, but it uses comma instead of dot. I want to use dot
 print(f"Type of Nedbor: {df['Nedbor'].dtype}") # object
 print(f"Type of Nedborsminutter: {df['Nedborsminutter'].dtype}") # object
 
-# convert to a small memory float like float8
+# Convert to a small memory float like float8
 df['Nedbor'] = df['Nedbor'].astype('float16') # Convert to float16
 df['Nedborsminutter'] = df['Nedborsminutter'].astype('float16') # Convert to float16
 
@@ -60,175 +61,99 @@ df['Nedborsminutter'] = df['Nedborsminutter'].fillna(0)
 
 #### Preprocess the dataset
 df['heavy_rain'] = (df['Nedbor'] > 5)  # Define "event" as rainfall > 5mm
-# check how many heavy rain events we have
+# Check how many heavy rain events we have
 print(f"Heavy rain events count: {df['heavy_rain'].sum()}")
+
+# Find the time beween heavy rain events
+df['TTE'] = df['heavy_rain'].astype(int).diff().fillna(0).cumsum()
+print(f"First row of TTE: {df['TTE'].iloc[0]}")
 
 ######### Create a new dataframe with daily rainfall data I want 
 
 # Create features for survival analysis
 # We'll create time-to-event data where event is heavy rainfall
 df = df.sort_values('datetime')
+print(f"First rows of the sorted dataframe: \n{df.head()}")
 
-# Define durations (time to next heavy rain)
-events = []
-durations = []
-features = []
-
-# Set threshold for "heavy rain" event (in mm)
-THRESHOLD = 5
-# Window size for feature extraction (hours)
-WINDOW = 24
-
-print("Running feature extraction...")
-for i in range(len(df) - WINDOW):
-    # Extract window of data for feature calculation
-    window = df.iloc[i:i+WINDOW]
+# # Aggregate by day
+# def process_day(group):
+#     # Find first heavy_rain event
+#     event_rows = group[group['heavy_rain'] == True]
+#     if not event_rows.empty:
+#         # Time to first event
+#         duration = event_rows.iloc[0]['Tid']
+#         event = 1
+#         # Use features just before or at event
+#         features = group[group['Tid'] <= duration][['Nedbor', 'Nedborsminutter']].mean()
+#     else:
+#         # Time to the end of the day (last recorded hour)
+#         duration = 24
+#         event = 0
+#         features = group[['Nedbor', 'Nedborsminutter']].mean()
     
-    # Calculate features from this window
-    total_rain = window['Nedbor'].sum()
-    max_rain = window['Nedbor'].max()
-    
-    # Hour of day and day of year as cyclical features
-    hour = window.iloc[-1]['datetime'].hour
-    hour_sin = np.sin(2 * np.pi * hour / 24)
-    hour_cos = np.cos(2 * np.pi * hour / 24)
-    
-    day = window.iloc[-1]['datetime'].dayofyear
-    day_sin = np.sin(2 * np.pi * day / 365)
-    day_cos = np.cos(2 * np.pi * day / 365)
-    
-    # Time to next heavy rain event
-    future_slice = df.iloc[i+WINDOW:]
-    if len(future_slice) == 0:
-        continue
-    
-    heavy_rain_idx = future_slice.index[future_slice['Nedbor'] > THRESHOLD].tolist()
-    
-    if heavy_rain_idx:  # If heavy rain occurs in the future
-        next_rain_idx = heavy_rain_idx[0]
-        duration = (future_slice.loc[next_rain_idx, 'datetime'] - window.iloc[-1]['datetime']).total_seconds() / 3600  # hours
-        event = 1
-    else:  # If no heavy rain in the remaining data
-        duration = (df.iloc[-1]['datetime'] - window.iloc[-1]['datetime']).total_seconds() / 3600  # hours
-        event = 0
-    
-    # Store the results
-    features.append([total_rain, max_rain, hour_sin, hour_cos, day_sin, day_cos])
-    durations.append(duration)
-    events.append(event)
+#     return pd.Series({
+#         'duration': duration,
+#         'event': event,
+#         'Nedbor': features['Nedbor'],
+#         'Nedborsminutter': features['Nedborsminutter']
+#     })
 
-# Create dataset for survival analysis
-survival_df = pd.DataFrame(features, columns=[
-    'total_rain', 'max_rain', 'hour_sin', 'hour_cos', 'day_sin', 'day_cos'
-])
-survival_df['duration'] = durations
-survival_df['event'] = events
+# # Apply to each day
+# survival_data = df.groupby('Dato').apply(process_day).reset_index()
+# # save as csv in data/processed
+# survival_data.to_csv(os.path.join(parent_parent_dir, 'data', 'processed', 'survival_data.csv'), index=False)
+# print("Survival data saved to CSV.")
+# print(survival_data.head())
 
-print(survival_df.head())
+# # Load the survival data
+# survival_data = pd.read_csv(os.path.join(parent_parent_dir, 'data', 'processed', 'survival_data.csv'))
 
-# Split the data into train, validation, and test sets
-df_test = survival_df.sample(frac=0.2, random_state=1234)
-df_train = survival_df.drop(df_test.index)
-df_val = df_train.sample(frac=0.2, random_state=1234)
-df_train = df_train.drop(df_val.index)
+# ==== Deep Cox PH model ====
 
-# Define columns for standardization
-cols_standardize = ['total_rain', 'max_rain']
-cols_leave = ['hour_sin', 'hour_cos', 'day_sin', 'day_cos']  
+# Extract features and targets
+cols = ['Nedbor', 'Nedborsminutter']
+x_raw = df[cols].values
+scaler = StandardScaler()
+x = scaler.fit_transform(x_raw).astype('float32')  # Explicitly cast to float32
+# events columns is the heavy rain event boolean
+events = df['heavy_rain'].values  # Event indicator (1 if heavy rain, 0 otherwise)
+# Convert boolean to int (0 or 1)
+events = events.astype(int)
+# TTE is the duration column
+durations = df['Tid'].values  # Time to event in hours
 
-# Set up preprocessing with DataFrameMapper
-standardize = [([col], StandardScaler()) for col in cols_standardize]
-leave = [(col, None) for col in cols_leave]
-x_mapper = DataFrameMapper(standardize + leave)
+# Build the neural network architecture for the Deep Cox PH model
+in_features = x.shape[1]
+hidden_layers = [32, 32]  # you can adjust hidden layer sizes
+net = tt.practical.MLPVanilla(in_features, hidden_layers, 1, dropout=0.1)
 
-# Preprocess the data
-x_train = x_mapper.fit_transform(df_train).astype('float32')
-x_val = x_mapper.transform(df_val).astype('float32')
-x_test = x_mapper.transform(df_test).astype('float32')
+# Determine device and move the model to CUDA if available
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+net.to(device)
 
-# Extract target variables (duration and event)
-get_target = lambda df: (df['duration'].values, df['event'].values)
-y_train = get_target(df_train)
-y_val = get_target(df_val)
-durations_test, events_test = get_target(df_test)
+# Instantiate the Cox PH model with the neural network
+model = CoxPH(net, optimizer=torch.optim.Adam)
 
-# Define the neural network architecture
-in_features = x_train.shape[1]  # Number of input features
-num_nodes = [32, 32]            # Two hidden layers with 32 nodes each
-out_features = 1                # Single output for CoxPH
-batch_norm = True               # Use batch normalization
-dropout = 0.1                   # Dropout rate to prevent overfitting
-output_bias = False             # No bias in output layer
+# Train the model (the fit method will use the device set in the network)
+model.fit(x, (durations, events), epochs=20, batch_size=32, verbose=True)
+print("Deep Cox PH model training complete.")
 
-net = tt.practical.MLPVanilla(
-    in_features, num_nodes, out_features, batch_norm, dropout, output_bias=output_bias
-)
+# save the model
+model_path = os.path.join(parent_parent_dir, 'models', 'deep_cox_model.pt')
+model.save(model_path)
+print(f"Model saved to {model_path}")
 
-# Initialize the CoxPH model with the neural network and Adam optimizer
-model = CoxPH(net, tt.optim.Adam)
-
-# Set the learning rate for the optimizer
-model.optimizer.set_lr(0.01)
-
-# Define training parameters
-epochs = 512                   # Maximum number of epochs
-batch_size = 256               # Batch size for training
-callbacks = [tt.callbacks.EarlyStopping()]  # Early stopping to prevent overfitting
-verbose = True                 # Print training progress
-
-# Train the model
-log = model.fit(
-    x_train, y_train, batch_size, epochs, callbacks, verbose, val_data=(x_val, y_val)
-)
-
-# Compute baseline hazards
-_ = model.compute_baseline_hazards()
-
-# Predict survival curves for the test set
-surv = model.predict_surv_df(x_test)
-
-# Evaluate model performance using the concordance index
-ev = EvalSurv(surv, durations_test, events_test, censor_surv='km')
-concordance = ev.concordance_td('antolini')
-print(f"Concordance index: {concordance}")
 
 # Plot survival curves
-plt.figure(figsize=(12, 8))
-for i in range(min(10, len(surv.columns))):  # Plot the first 10 samples
-    plt.step(surv.index, surv.iloc[:, i], where="post", label=f"Sample {i}")
-plt.xlabel('Time (hours)')
-plt.ylabel('Probability of no heavy rainfall')
-plt.grid(True)
-plt.title('Survival Curves: Probability of Avoiding Heavy Rainfall')
+surv = model.predict_surv_df(x)
+time_points = surv.index
+plt.figure(figsize=(10, 6))
+for i in range(min(10, len(x))):  # Plot survival curves for the first 10 samples
+    plt.step(time_points, surv.iloc[:, i], where="post", label=f"Sample {i+1}")
+plt.title("Survival Curves")
+plt.xlabel("Time")
+plt.ylabel("Survival Probability")
 plt.legend()
-plt.savefig('rainfall_survival_curves.png')
-plt.show()
-
-# Plot mean survival curve
-plt.figure(figsize=(10, 6))
-mean_surv = surv.mean(axis=1)
-plt.step(surv.index, mean_surv, where="post", linewidth=2)
-plt.xlabel('Time (hours)')
-plt.ylabel('Mean probability of no heavy rainfall')
 plt.grid(True)
-plt.title('Mean Survival Curve for Heavy Rainfall Events')
-plt.savefig('mean_rainfall_survival_curve.png')
 plt.show()
 
-# Calculate and plot feature importance
-feature_names = cols_standardize + cols_leave
-feature_importance = np.abs(model.net.parameters()[-2].detach().numpy()).flatten()
-
-# Normalize importance values
-feature_importance = feature_importance / np.sum(feature_importance)
-
-# Create bar plot for feature importance
-plt.figure(figsize=(10, 6))
-plt.bar(feature_names, feature_importance)
-plt.xlabel('Features')
-plt.ylabel('Importance')
-plt.title('Feature Importance for Rainfall Prediction')
-plt.xticks(rotation=45)
-plt.tight_layout()
-plt.savefig('rainfall_feature_importance.png')
-plt.show()
