@@ -23,18 +23,47 @@ except FileNotFoundError:
     print(f"File not found: {DATAFILE}")
     raise
 
-# Convert problematic columns to numeric - this fixes the TypeError
-df['Nedbr'] = pd.to_numeric(df['Nedbr'], errors='coerce')
-df['Nedbrsminutter'] = pd.to_numeric(df['Nedbrsminutter'], errors='coerce')
+df['Dato'] = pd.to_datetime(df['Dato'], format='%d.%m.%Y')
+df['Tid'] = df.apply(lambda x: int(x['Tid'].split(':')[0]), axis=1) # Convert time to hours e.g. '12:00:00' to 12
+print(f"First row of time: {df['Tid'].iloc[0]}")
+df['datetime'] = df['Dato'] + pd.to_timedelta(df['Tid'], unit='h') 
+print(f"First rows of datetime: {df['datetime'].iloc[0]}")
 
-# Fill any NaN values - fixed to avoid chained assignment warnings
-# Instead of using inplace=True on a slice, reassign the values
-df['Nedbr'] = df['Nedbr'].fillna(0)
-df['Nedbrsminutter'] = df['Nedbrsminutter'].fillna(0)
+# Print type of nedbor and nedborsminutter columns
+# Nedbor is float64 but in 1,5 in mm, but it uses comma instead of dot. I want to use dot
+print(f"Type of Nedbor: {df['Nedbor'].dtype}") # object
+print(f"Type of Nedborsminutter: {df['Nedborsminutter'].dtype}") # object
 
-# Preprocess the dataset
-df['datetime'] = pd.to_datetime(df['Dato'] + ' ' + df['Tid'], format='%d.%m.%Y %H:%M:%S')
-df['heavy_rain'] = (df['Nedbr'] > 5).astype(int)  # Define "event" as rainfall > 5mm
+# convert to a small memory float like float8
+df['Nedbor'] = df['Nedbor'].astype('float16') # Convert to float16
+df['Nedborsminutter'] = df['Nedborsminutter'].astype('float16') # Convert to float16
+
+print(f"Type of Nedbor: {df['Nedbor'].dtype}")
+print(f"Type of Nedborsminutter: {df['Nedborsminutter'].dtype}") 
+
+########## NAN ########
+# Check nans in Nedbor and Nedborsminutter columns
+print(f"Nedbor NaN count: {df['Nedbor'].isna().sum()}")
+print(f"Nedborsminutter NaN count: {df['Nedborsminutter'].isna().sum()}")
+# Indexes of the Nans 
+nedbor_nan_indexes = df[df['Nedbor'].isna()].index.tolist()
+nedborsminutter_nan_indexes = df[df['Nedborsminutter'].isna()].index[:2].tolist()
+
+print(f"Nedbor NaN indexes: {nedbor_nan_indexes[:2]}")
+print(f"Nedborsminutter NaN indexes: {nedborsminutter_nan_indexes[:2]}")
+# Show the first 2 Nana Nedbor and Nedborsminutter values
+print(f"First 2 Nedbor nan values: {df['Nedbor'].iloc[nedbor_nan_indexes[:2]].tolist()}")
+print(f"First 2 Nedborsminutter nan values: {df['Nedborsminutter'].iloc[nedborsminutter_nan_indexes[:2]].tolist()}")
+
+df['Nedbor'] = df['Nedbor'].fillna(0)
+df['Nedborsminutter'] = df['Nedborsminutter'].fillna(0)
+
+#### Preprocess the dataset
+df['heavy_rain'] = (df['Nedbor'] > 5)  # Define "event" as rainfall > 5mm
+# check how many heavy rain events we have
+print(f"Heavy rain events count: {df['heavy_rain'].sum()}")
+
+######### Create a new dataframe with daily rainfall data I want 
 
 # Create features for survival analysis
 # We'll create time-to-event data where event is heavy rainfall
@@ -50,21 +79,14 @@ THRESHOLD = 5
 # Window size for feature extraction (hours)
 WINDOW = 24
 
-# Print data types to verify conversion
-print("Data types after conversion:")
-print(df.dtypes)
-print(f"Sample Nedbr values: {df['Nedbr'].head().tolist()}")
-print(f"Sample Nedbrsminutter values: {df['Nedbrsminutter'].head().tolist()}")
-
+print("Running feature extraction...")
 for i in range(len(df) - WINDOW):
     # Extract window of data for feature calculation
     window = df.iloc[i:i+WINDOW]
     
     # Calculate features from this window
-    total_rain = window['Nedbr'].sum()
-    max_rain = window['Nedbr'].max()
-    rain_minutes = window['Nedbrsminutter'].sum()
-    rain_frequency = (window['Nedbr'] > 0).sum() / WINDOW
+    total_rain = window['Nedbor'].sum()
+    max_rain = window['Nedbor'].max()
     
     # Hour of day and day of year as cyclical features
     hour = window.iloc[-1]['datetime'].hour
@@ -80,7 +102,7 @@ for i in range(len(df) - WINDOW):
     if len(future_slice) == 0:
         continue
     
-    heavy_rain_idx = future_slice.index[future_slice['Nedbr'] > THRESHOLD].tolist()
+    heavy_rain_idx = future_slice.index[future_slice['Nedbor'] > THRESHOLD].tolist()
     
     if heavy_rain_idx:  # If heavy rain occurs in the future
         next_rain_idx = heavy_rain_idx[0]
@@ -91,14 +113,13 @@ for i in range(len(df) - WINDOW):
         event = 0
     
     # Store the results
-    features.append([total_rain, max_rain, rain_minutes, rain_frequency, hour_sin, hour_cos, day_sin, day_cos])
+    features.append([total_rain, max_rain, hour_sin, hour_cos, day_sin, day_cos])
     durations.append(duration)
     events.append(event)
 
 # Create dataset for survival analysis
 survival_df = pd.DataFrame(features, columns=[
-    'total_rain', 'max_rain', 'rain_minutes', 'rain_frequency',
-    'hour_sin', 'hour_cos', 'day_sin', 'day_cos'
+    'total_rain', 'max_rain', 'hour_sin', 'hour_cos', 'day_sin', 'day_cos'
 ])
 survival_df['duration'] = durations
 survival_df['event'] = events
@@ -112,8 +133,8 @@ df_val = df_train.sample(frac=0.2, random_state=1234)
 df_train = df_train.drop(df_val.index)
 
 # Define columns for standardization
-cols_standardize = ['total_rain', 'max_rain', 'rain_minutes', 'rain_frequency']
-cols_leave = ['hour_sin', 'hour_cos', 'day_sin', 'day_cos']  # These are already normalized
+cols_standardize = ['total_rain', 'max_rain']
+cols_leave = ['hour_sin', 'hour_cos', 'day_sin', 'day_cos']  
 
 # Set up preprocessing with DataFrameMapper
 standardize = [([col], StandardScaler()) for col in cols_standardize]
@@ -211,4 +232,3 @@ plt.xticks(rotation=45)
 plt.tight_layout()
 plt.savefig('rainfall_feature_importance.png')
 plt.show()
-
