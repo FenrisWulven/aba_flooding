@@ -91,13 +91,16 @@ def init_map():
         try:
             # Extract soil types from sediment data
             soil_types = sediment_mercator['sediment'].unique().tolist()
+            for i, soil_type in enumerate(soil_types):
+                # take the first two characters of the soil type
+                soil_types[i] = soil_type.split(' ')[0]
+
             print(f"Found soil types in sediment data: {soil_types}")
             
             # Known soil types we have data for
             known_soil_types = ["DG - Meltwater gravel", "DS - Meltwater sand"]
             
             # Train FloodModel with all soil types from sediment data
-            # The function will handle missing data internally
             flood_model = train_all_models(soil_types)
             
             # Plot models for available soil types
@@ -192,49 +195,46 @@ def init_map():
             )
             year_slider.js_on_change('value', year_callback)
             
-            # Create a dynamic hover tool that includes the current year's prediction
+            # Create a single hover tool that will be dynamically updated
             hover = HoverTool(
                 tooltips=[
                     ("Soil Type", "@sediment"),
                     ("Elevation", "@elevation{0,0.0}"),
-                    ("Current Year Prediction", "@predictions_0{0.0}%"),
+                    ("Current Prediction (Year 0)", "@predictions_0{0.0}%"),  # This will be updated by the slider
                     ("5-Year Prediction", "@predictions_5{0.0}%"),
                     ("10-Year Prediction", "@predictions_10{0.0}%")
-                ]
+                ],
+                renderers=[flood_layer]  # Explicitly attach to flood layer
             )
             
-            # Add tooltip for current year (updated by JavaScript)
+            # Improved tooltip callback that updates the hover display
             hover_callback = CustomJS(
                 args=dict(hover=hover, slider=year_slider),
                 code="""
-                    // Update the hover tooltip to show the current year's prediction
+                    // Get current year from slider
                     const year = Math.round(slider.value);
                     const field = 'predictions_' + year;
                     
-                    // Update the third tooltip (index 2)
-                    hover.tooltips[2] = ["Year " + year + " Prediction", "@" + field + "{0.0}%"];
+                    // Update the hover tooltip with the current year
+                    hover.tooltips[2][0] = "Current Prediction (Year " + year + ")";
+                    hover.tooltips[2][1] = "@" + field + "{0.0}%";
+                    
+                    // Force the hover tool to update
+                    hover.change.emit();
+                    console.log("Updated hover tooltip for year: " + year);
                 """
             )
+            
+            # Add the hover callback to the slider's change event
             year_slider.js_on_change('value', hover_callback)
             
+            # Add the hover tool to the plot
             p.add_tools(hover)
             
         except Exception as e:
             print(f"Error setting up flood predictions: {e}")
             import traceback
             traceback.print_exc()
-    
-    # Configure hover tool to show the current prediction value based on slider
-    hover = HoverTool(
-        tooltips=[
-            ("Soil Type", "@sediment"),
-            ("Elevation", "@elevation"),
-            ("Flood Risk (Year 0)", "@predictions_0%"),
-            ("Flood Risk (Year 5)", "@predictions_5%"),
-            ("Flood Risk (Year 10)", "@predictions_10%")
-        ]
-    )
-    p.add_tools(hover)
     
     # Layer visibility controls
     layer_names = ["Terrain", "Sediment"]

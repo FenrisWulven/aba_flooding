@@ -3,6 +3,8 @@ import pandas as pd
 import geopandas as gpd
 import geo_utils as gu
 import matplotlib.pyplot as plt
+import perculation_mapping as pm
+import os
 
 # QUick Intro:
 # Goal: 
@@ -11,18 +13,15 @@ import matplotlib.pyplot as plt
 # this dict of trained models will be passed to the flood_layer to give it directions for its heatmap.s
 
 def load_process_data():
-    # TODO
-
     df = pd.read_csv("data/raw/Regn2004-2025.csv", sep=";")
     df['Dato'] = pd.to_datetime(df['Dato'], format='%d.%m.%Y')
 
     df['Tid'] = df.apply(lambda x: int(x['Tid'].split(':')[0]), axis=1)
     df['datetime'] = df['Dato'] + pd.to_timedelta(df['Tid'], unit='h')
-    absorbtions = {'DG - Meltwater gravel': 0.1, 'DS - Meltwater sand': 0.2}
+    absorbtions = gather_soil_types(pm.percolation_rates_updated)
 
     for soil_type, rate in absorbtions.items():
         df[f'WOG_{soil_type}'] = 0.0
-        
     
         # Create temporary series for calculation
         wog = pd.Series(0.0, index=df.index)
@@ -32,13 +31,11 @@ def load_process_data():
             wog.iloc[i] = max(0, wog.iloc[i-1] * (1 - rate) + df['Nedbor'].iloc[i])
             
         # Assign back to dataframe
-        df[f'WOG_{soil_type}'] = wog  # Use new variable name
+        df[f'WOG_{soil_type}'] = wog
 
         df.dropna(inplace=True)
         
-        # Rest of code as before
         df[f"{soil_type}observed"] = (df[f"WOG_{soil_type}"] > 10).astype(int)
-        
 
         dry_spells = []
         current_duration = 0
@@ -66,14 +63,19 @@ def load_process_data():
             dry_spells.append({"duration": current_duration, "observed": 0})
 
         df[f'{soil_type}duration'] = durations
-        print("columns: ", df.columns)
 
     return df
 
-def gather_soil_types(sediment_geo_json):
-    # Gets all possible soil types and matches them with the available data.
-    # TODO
-    pass
+def gather_soil_types(purculation_mapping):
+    # Take perculation Keys and the min and max / 2 and add to a dict
+    # soil_types = {}
+    soil_types = {}
+    for key, value in purculation_mapping.items():
+        min = 0.000001 if value['min'] == 0 else value['min']
+        max = 0.999999 if value['max'] == 1 else value['max']
+            
+        soil_types[key] = (min + max) / 2
+    return soil_types
 
 def preprocess_data_for_survival(df, soil_types):
     """
@@ -156,24 +158,63 @@ def train_all_models(soiltypes):
     --------
     FloodModel : Trained flood model (not a tuple anymore)
     """
-    # Load and process data
-    df = load_process_data()
     
-    # Get the soil types we actually have data for in our absorption dictionary
-    available_soiltypes = list(df.filter(regex=r'.*observed$').columns)
-    available_soiltypes = [col.replace('observed', '') for col in available_soiltypes]
+    processed_data_path = "data/processed/survival_data.csv"
     
-    print(f"Data available for soil types: {available_soiltypes}")
-    print(f"Requested soil types: {soiltypes}")
-    
-    # Filter to only include soil types that we have data for
-    valid_soiltypes = [st for st in soiltypes if st in available_soiltypes]
-    if not valid_soiltypes:
-        print("Warning: None of the requested soil types have data. Using all available soil types.")
-        valid_soiltypes = available_soiltypes
-    
-    # Preprocess data for survival analysis
-    survival_dfs = preprocess_data_for_survival(df, valid_soiltypes)
+    if os.path.exists(processed_data_path):
+        print(f"Loading preprocessed survival data from {processed_data_path}")
+        survival_df_combined = pd.read_csv(processed_data_path)
+        
+        # Convert back to dictionary of dataframes
+        survival_dfs = {}
+        for soil_type in soiltypes:
+            soil_data = survival_df_combined[survival_df_combined['soil_type'] == soil_type]
+            if len(soil_data) > 0:
+                survival_dfs[soil_type] = soil_data[['duration', 'observed']].reset_index(drop=True)
+                
+                # Print statistics for this soil type
+                print(f"\nStatistics for {soil_type} (loaded from file):")
+                print(f"Number of dry spells: {len(survival_dfs[soil_type])}")
+                print(f"Average duration: {survival_dfs[soil_type]['duration'].mean()}")
+                print(f"Max duration: {survival_dfs[soil_type]['duration'].max()}")
+        
+        # Load raw data for the model training
+        df = load_process_data()
+        
+    else:
+        print("Preprocessing data and saving results...")
+        # Load and process data
+        df = load_process_data()
+        
+        # Get the soil types we actually have data for in our absorption dictionary
+        available_soiltypes = list(df.filter(regex=r'.*observed$').columns)
+        available_soiltypes = [col.replace('observed', '') for col in available_soiltypes]
+        
+        print(f"Data available for soil types: {available_soiltypes}")
+        
+        # Filter to only include soil types that we have data for
+        valid_soiltypes = [st for st in soiltypes if st in available_soiltypes]
+        if not valid_soiltypes:
+            print("Warning: None of the requested soil types have data. Using all available soil types.")
+            valid_soiltypes = available_soiltypes
+        
+        # Preprocess data for survival analysis
+        survival_dfs = preprocess_data_for_survival(df, valid_soiltypes)
+        
+        # Save preprocessed data
+        # First, ensure directory exists
+        os.makedirs(os.path.dirname(processed_data_path), exist_ok=True)
+        
+        # Combine all survival dataframes into one with soil type column
+        survival_df_combined = pd.DataFrame()
+        for soil_type, soil_df in survival_dfs.items():
+            soil_df_copy = soil_df.copy()
+            soil_df_copy['soil_type'] = soil_type
+            survival_df_combined = pd.concat([survival_df_combined, soil_df_copy], ignore_index=True)
+        
+        # Save to CSV
+        survival_df_combined.to_csv(processed_data_path, index=False)
+        print(f"Saved preprocessed survival data to {processed_data_path}")
     
     # Initialize FloodModel with all requested soil types (even those without data)
     floodModel = md.FloodModel()
