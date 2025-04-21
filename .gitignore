@@ -179,3 +179,5 @@ cython_debug/
 #.idea/
 
 lightning_logs/
+
+reports/figures/

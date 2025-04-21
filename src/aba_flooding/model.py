@@ -86,7 +86,7 @@ class SurvivalModel:
         else:  # years or other units
             duration = min(year, max_observed)
             
-        print(f"Soil type: {self.soil_type}, Year: {year}, Duration: {duration}, Max observed: {max_observed}")
+        #print(f"Soil type: {self.soil_type}, Year: {year}, Duration: {duration}, Max observed: {max_observed}")
         
         # Get probability and apply a dampening function to avoid 100% predictions
         # as years increase
@@ -96,7 +96,7 @@ class SurvivalModel:
         if year > 1:
             # Dampened probability that approaches but never quite reaches 100%
             prob = raw_prob * (1 - 0.1 / year)
-            print(f"Year {year}: Raw prob {raw_prob:.4f}, dampened to {prob:.4f}")
+            #print(f"Year {year}: Raw prob {raw_prob:.4f}, dampened to {prob:.4f}")
         else:
             prob = raw_prob
         
@@ -147,7 +147,7 @@ class FloodModel:
         if survival_dfs and isinstance(survival_dfs, dict):
             for soil_type, survival_df in survival_dfs.items():
                 if len(survival_df) > 0:
-                    print(f"Training model for {soil_type} using provided survival dataframe")
+                    #print(f"Training model for {soil_type} using provided survival dataframe")
                     model = SurvivalModel(soil_type=soil_type)
                     model.train(survival_df, duration_column, event_column)
                     self.models[soil_type] = model
@@ -162,10 +162,10 @@ class FloodModel:
                 column_duration = f"{soil_type}{duration_column}"
                 column_event = f"{soil_type}{event_column}"
                 
-                print(f"Looking for columns: {column_duration} and {column_event}")
+                #print(f"Looking for columns: {column_duration} and {column_event}")
                 
                 if column_duration in data.columns and column_event in data.columns:
-                    print(f"Training model for {soil_type} using columns {column_duration} and {column_event}")
+                    #print(f"Training model for {soil_type} using columns {column_duration} and {column_event}")
                     # Create subset with only the needed columns
                     subset_df = data[[column_duration, column_event]].rename(
                         columns={column_duration: 'duration', column_event: 'observed'})
@@ -182,7 +182,7 @@ class FloodModel:
         # Handle any missing soil types with default models
         for soil_type in self.soil_types:
             if soil_type not in self.models:
-                print(f"Creating default model for soil type '{soil_type}'")
+                #print(f"Creating default model for soil type '{soil_type}'")
                 default_model = SurvivalModel(soil_type=soil_type)
                 # Use an existing model if available
                 if len(self.models) > 0:
@@ -229,7 +229,7 @@ class FloodModel:
                     'prediction': raw_prediction
                 })
                 
-                print(f"Soil {soil_type}, Year {year}: Prediction = {raw_prediction:.4f}")
+                #print(f"Soil {soil_type}, Year {year}: Prediction = {raw_prediction:.4f}")
             except Exception as e:
                 print(f"Error predicting for soil type {soil_type}: {str(e)}")
                 predictions[soil_type] = 0.5  # Default value on error
@@ -251,7 +251,7 @@ class FloodModel:
         # Handle missing soil types
         missing_soil_types = geodata.loc[geodata[column_name].isna(), 'sediment'].unique()
         if len(missing_soil_types) > 0:
-            print(f"No predictions for soil types: {missing_soil_types}")
+            #print(f"No predictions for soil types: {missing_soil_types}")
             # Set default values that increase with year but never reach 100%
             default_value = min(0.2 + 0.05 * year, 0.7)
             geodata[column_name].fillna(default_value, inplace=True)
@@ -262,7 +262,7 @@ class FloodModel:
         
         return geodata
     
-    def plot_all(self, save=False):
+    def plot_all(self, save=False, output_dir='reports/figures/'):
         """Plot survival functions for all soil types."""
         if not self.is_fitted:
             raise RuntimeError("Model must be trained before plotting")
@@ -277,6 +277,10 @@ class FloodModel:
             if save:
                 # make the soil type safe for saving by changing '/' to '_'
                 soil_type_safe = soil_type.replace('/', '_')
-                plt.savefig(f"{soil_type_safe}_survival_function.png")
+                plt.savefig(f"{output_dir}{soil_type_safe}_survival_function.png")
             else:
                 plt.show()
+    
+    def load(path):
+        # Takes a pickle object and loads it
+        pass
