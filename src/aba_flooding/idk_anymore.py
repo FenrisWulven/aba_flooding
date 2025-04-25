@@ -6,10 +6,6 @@
 # It also includes logging for better tracking of the process.
 #=================================================================================================#
 
-
-
-
-
 import requests, os, json, folium, logging, time, random, gc, time, logging
 from tqdm import tqdm
 import pandas as pd

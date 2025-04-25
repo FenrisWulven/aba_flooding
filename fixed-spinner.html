@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rainbow Header with Continuously Rotating Image</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        h1 {
+            font-size: 3rem;
+            transition: color 0.5s;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+        }
+        
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 15px 32px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 20px 10px;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: background-color 0.3s;
+        }
+        
+        button:hover {
+            background-color: #45a049;
+        }
+        
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        #image-upload {
+            display: none;
+        }
+        
+        #upload-label {
+            background-color: #2196F3;
+            color: white;
+            padding: 15px 32px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 20px 10px;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: background-color 0.3s;
+        }
+        
+        #upload-label:hover {
+            background-color: #0b7dda;
+        }
+        
+        #image-container {
+            width: 250px;
+            height: 250px;
+            margin: 30px auto;
+            position: relative;
+            border: 2px dashed #ccc;
+            border-radius: 50%;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        #spinner-image {
+            max-width: 100%;
+            max-height: 100%;
+        }
+        
+        #placeholder-text {
+            color: #999;
+            font-size: 1.2rem;
+        }
+        
+        /* CSS animation for continuous rotation */
+        @keyframes spin {
+            from {
+                transform: rotate(0deg);
+            }
+            to {
+                transform: rotate(360deg);
+            }
+        }
+        
+        .spinning {
+            animation: spin 3s linear infinite;
+        }
+
+        /* Speed controls */
+        .speed-controls {
+            margin: 20px auto;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+        }
+        
+        .speed-button {
+            background-color: #607d8b;
+            padding: 10px 15px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <h1 id="rainbow-header">Rainbow Header with Image Spinner</h1>
+    
+    <p>Upload an image and click the spin button to make it rotate continuously!</p>
+    
+    <label id="upload-label" for="image-upload">Upload Image</label>
+    <input type="file" id="image-upload" accept="image/*">
+    <button id="spin-button" disabled>Spin Image!</button>
+    
+    <div class="speed-controls">
+        <button id="slow-button" class="speed-button" disabled>Slow</button>
+        <button id="medium-button" class="speed-button" disabled>Medium</button>
+        <button id="fast-button" class="speed-button" disabled>Fast</button>
+    </div>
+    
+    <div id="image-container">
+        <div id="placeholder-text">Upload an image to spin</div>
+        <img id="spinner-image" style="display: none;">
+    </div>
+    
+    <script>
+        // Rainbow color changing header
+        const header = document.getElementById('rainbow-header');
+        let hue = 0;
+        
+        function changeHeaderColor() {
+            hue = (hue + 1) % 360;
+            header.style.color = `hsl(${hue}, 100%, 50%)`;
+            header.style.textShadow = `0 0 10px hsl(${hue}, 80%, 70%)`;
+            requestAnimationFrame(changeHeaderColor);
+        }
+        
+        // Start the color animation
+        changeHeaderColor();
+        
+        // Image upload and rotation
+        const imageUpload = document.getElementById('image-upload');
+        const spinnerImage = document.getElementById('spinner-image');
+        const placeholderText = document.getElementById('placeholder-text');
+        const spinButton = document.getElementById('spin-button');
+        const slowButton = document.getElementById('slow-button');
+        const mediumButton = document.getElementById('medium-button');
+        const fastButton = document.getElementById('fast-button');
+        
+        let isSpinning = false;
+        
+        // Handle image upload
+        imageUpload.addEventListener('change', function(event) {
+            if (event.target.files && event.target.files[0]) {
+                const reader = new FileReader();
+                
+                reader.onload = function(e) {
+                    spinnerImage.src = e.target.result;
+                    spinnerImage.style.display = 'block';
+                    placeholderText.style.display = 'none';
+                    spinButton.disabled = false;
+                    slowButton.disabled = false;
+                    mediumButton.disabled = false;
+                    fastButton.disabled = false;
+                };
+                
+                reader.readAsDataURL(event.target.files[0]);
+            }
+        });
+        
+        // Set up speed control functions
+        function setSpeed(seconds) {
+            if (spinnerImage.classList.contains('spinning')) {
+                spinnerImage.style.animationDuration = `${seconds}s`;
+            }
+        }
+        
+        slowButton.addEventListener('click', function() {
+            if (isSpinning) {
+                setSpeed(8); // 8 seconds per rotation
+            }
+        });
+        
+        mediumButton.addEventListener('click', function() {
+            if (isSpinning) {
+                setSpeed(4); // 4 seconds per rotation
+            }
+        });
+        
+        fastButton.addEventListener('click', function() {
+            if (isSpinning) {
+                setSpeed(1); // 1 second per rotation
+            }
+        });
+        
+        // Handle spin button click
+        spinButton.addEventListener('click', function() {
+            if (!isSpinning) {
+                isSpinning = true;
+                this.textContent = 'Stop Spinning';
+                this.style.backgroundColor = '#f44336';
+                
+                // Add the spinning class for CSS animation
+                spinnerImage.classList.add('spinning');
+                setSpeed(3); // Default: 3 seconds per rotation
+            } else {
+                isSpinning = false;
+                this.textContent = 'Spin Image!';
+                this.style.backgroundColor = '#4CAF50';
+                
+                // Remove the spinning class to stop animation
+                spinnerImage.classList.remove('spinning');
+            }
+        });
+    </script>
+</body>
+</html>

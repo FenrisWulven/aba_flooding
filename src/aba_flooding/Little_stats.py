@@ -7,9 +7,6 @@
 # The script uses the pandas library to read the parquet file and perform data analysis.
 #=================================================================================================#
 
-
-
-
 import pandas as pd
 import numpy as np
 from datetime import datetime

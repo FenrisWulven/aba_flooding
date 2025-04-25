@@ -10,8 +10,6 @@
 # with the necessary libraries installed.                                                               #
 #=======================================================================================================#
 
-
-
 import requests
 import pandas as pd
 import folium

@@ -4,7 +4,6 @@
 # and saves the data into a Parquet file. It also logs the processing steps and statistics.       #
 #=================================================================================================#
 
-
 import os
 import json
 import pandas as pd
