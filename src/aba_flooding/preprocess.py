@@ -480,81 +480,88 @@ def calculate_water_on_ground(df, soil_types, absorbtions, station):
     --------
     pandas.DataFrame: Dataframe with water on ground values for the specified soil types
     """
-    result_df = df.copy()
+    # Get precipitation values as numpy array for faster calculations
+    precip_array = df['Nedbor'].values
+    n = len(precip_array)
     
-    for soil_type in soil_types:
-        if soil_type not in absorbtions:
-            print(f"Warning: No absorption rate found for soil type '{soil_type}', skipping...")
-            continue
-            
+    # Process all soil types at once using numpy operations
+    soil_type_data = {}
+    new_columns = {}  # Dict to collect all columns before creating DataFrame
+    valid_soil_types = [st for st in soil_types if st in absorbtions]
+    
+    if not valid_soil_types:
+        print(f"No valid soil types with known absorption rates for station {station}")
+        return df.copy()
+        
+    # Pre-allocate numpy arrays for all calculations to avoid memory allocations in loops
+    for soil_type in valid_soil_types:
         rate = absorbtions[soil_type]
-        result_df[f'{station}_WOG_{soil_type}'] = 0.0
+        soil_type_data[soil_type] = {
+            'rate': rate,
+            'wog_array': np.zeros(n),
+            'observed': np.zeros(n, dtype=int),
+            'tte': np.full(n, n),  # Fill with max value initially
+            'duration': np.zeros(n, dtype=int)
+        }
     
-        # Create temporary series for calculation
-        wog = pd.Series(0.0, index=df.index)
+    # Parallel WOG calculation for each soil type using vectorized operations where possible
+    for soil_type, data in soil_type_data.items():
+        rate = data['rate']
+        wog = data['wog_array']
         
-        # Loop is necessary because each calculation depends on previous result
-        for i in range(1, len(df)):
-            wog.iloc[i] = max(0, wog.iloc[i-1] * (1 - rate) + df['Nedbor'].iloc[i])
-            
-        # Assign back to dataframe
-        result_df[f'{station}_WOG_{soil_type}'] = wog
-
-        # Drop NaN values
-        result_df.dropna(inplace=True)
+        # First time step
+        wog[0] = max(0, precip_array[0])
         
-        # Calculate observed state (1 if water on ground > threshold, 0 otherwise)
-        result_df[f"{station}_{soil_type}_observed"] = (result_df[f"{station}_WOG_{soil_type}"] > 10).astype(int)
-
-        # Calculate dry spell durations
-        dry_spells = []
+        # Vectorized recurrence relation using a cumulative approach
+        for i in range(1, n):
+            wog[i] = max(0, wog[i-1] * (1 - rate) + precip_array[i])
+        
+        # Calculate observed state (> threshold)
+        data['observed'] = (wog > 10).astype(int)
+        
+        # Calculate durations and TTEs (less vectorizable due to dependencies)
         current_duration = 0
-        durations = []
-        in_wet_state = False  # Track if we're currently in a wet period
-
-        for idx, row in result_df.iterrows():
-            if row[f"{station}_{soil_type}_observed"] == 0:  # Dry period
-                if in_wet_state:  # Transition from wet to dry
-                    in_wet_state = False
-                current_duration += 1
-            else:  # Wet period
-                if not in_wet_state:  # Only count transition from dry to wet as an event
-                    in_wet_state = True
-                    if current_duration > 0:
-                        # End of a dry spell
-                        dry_spells.append({"duration": current_duration, "observed": 1})
-                        current_duration = 0
-                # If already in wet state, ignore this wet period (treating as same event)
-            
-            durations.append(current_duration)
+        durations = np.zeros(n, dtype=int)
         
-        # Time to event
-        # Initialize TTE column with default maximum possible time
-        result_df[f'{station}_{soil_type}_TTE'] = len(result_df)  
-
-        # Identify indices where heavy rain (observed state) occurs
-        event_indices = result_df.index[result_df[f"{station}_{soil_type}_observed"] == 1].tolist()
-
-        # Calculate time to the next event for each observation
-        for i in range(len(event_indices) - 1):
-            current_event = event_indices[i]
-            next_event = event_indices[i + 1]
+        # First pass: Calculate durations
+        for i in range(n):
+            if data['observed'][i] == 0:  # Dry period
+                current_duration += 1
+            else:  # Wet period - reset counter
+                current_duration = 0
+            durations[i] = current_duration
+        
+        data['duration'] = durations
+        
+        # Find event indices
+        event_indices = np.where(data['observed'] == 1)[0]
+        
+        # Calculate TTE using vectorized approach
+        if len(event_indices) > 0:
+            tte = np.full(n, n)  # Default to maximum
+            tte[event_indices] = 0  # Events have TTE=0
             
-            # Assign TTE for observations between current and next event
-            result_df.loc[current_event:next_event - 1, f'{station}_{soil_type}_TTE'] = range(next_event - current_event, 0, -1)
-
-        # Set TTE to 0 for observations with heavy rain
-        result_df.loc[result_df[f"{station}_{soil_type}_observed"] == 1, f'{station}_{soil_type}_TTE'] = 0
-
-
-        # Handle censoring (if the dataset ends with a dry spell)
-        if current_duration > 0:
-            dry_spells.append({"duration": current_duration, "observed": 0})
-
-        result_df[f'{station}_{soil_type}_duration'] = durations
-
+            # For periods between events, calculate TTE
+            for i in range(len(event_indices) - 1):
+                start_idx = event_indices[i]
+                end_idx = event_indices[i+1]
+                tte[start_idx:end_idx] = np.arange(end_idx - start_idx, 0, -1)
+            
+            data['tte'] = tte
+            
+        # Add columns to the dictionary
+        new_columns[f'{station}_WOG_{soil_type}'] = data['wog_array']
+        new_columns[f"{station}_{soil_type}_observed"] = data['observed']
+        new_columns[f'{station}_{soil_type}_TTE'] = data['tte']
+        new_columns[f'{station}_{soil_type}_duration'] = data['duration']
+    
+    # Create new DataFrame with all columns at once
+    new_df = pd.DataFrame(new_columns, index=df.index)
+    
+    # Combine with original data
+    result_df = pd.concat([df, new_df], axis=1)
+    
     return result_df
-
 def load_process_data():
     """
     Load precipitation data and calculate water-on-ground values for different soil types.
@@ -580,9 +587,6 @@ def load_process_data():
         # Get absorption rates for each soil type
         absorbtions = gather_soil_types(pm.percolation_rates_updated)
         print(f"Gathered absorption rates for {len(absorbtions)} soil types")
-
-        # Create empty dataframe to store results
-        df_result = pd.DataFrame(index=df.index)
         
         # Process only a subset of stations for debugging if needed
         #stations_to_process = df.columns[:2]  # Uncomment to process only first 2 stations
@@ -607,16 +611,17 @@ def load_process_data():
             # Calculate water on ground for each soil type
             try:
                 df_processed = calculate_water_on_ground(df_station, sediment_types, absorbtions, station)
-                # Add processed data to result DataFrame
-                for col in df_processed.columns:
-                    if col != 'Nedbor':  # Skip the precipitation column
-                        df_result[col] = df_processed[col]
+                # Add processed columns to results (excluding 'Nedbor')
+                result_columns = df_processed.drop(columns=['Nedbor'], errors='ignore')
+                if not result_columns.empty:
+                    save_preprocessed_data(result_columns, f"data/processed/survival_data_{station}.csv")
+                    print(f"Saved processed data for station {station}")
             except Exception as e:
                 print(f"Error processing station {station}: {e}")
                 continue
         
-        print(f"Finished processing data with {len(df_result.columns)} result columns")
-        return df_result
+        # Combine all result DataFrames at once
+        return None  # Return None to indicate completion
         
     except Exception as e:
         print(f"Error in load_process_data: {e}")
@@ -639,8 +644,13 @@ def save_preprocessed_data(survival_df, output_path="data/processed/survival_dat
     
     # Ensure the output directory exists
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    # Save to CSV
-    survival_df.to_csv(output_path, index=False)
+    # Save to Parquet for better performance
+    try:
+        survival_df.to_parquet(output_path.replace('.csv', '.parquet'), index=False)
+        print(f"Saved preprocessed survival data to {output_path.replace('.csv', '.parquet')}")
+    except Exception as e:
+        print(f"Error saving to Parquet: {e}")
+        survival_df.to_csv(output_path, index=False)
     print(f"Saved preprocessed survival data to {output_path}")
     
     return survival_df
@@ -659,6 +669,18 @@ def load_saved_data(file_path="data/processed/survival_data.csv"):
     dict
         Dictionary with soil types as keys and survival dataframes as values
     """
+
+    import os
+
+    # load parquet file if it exists
+    try:
+        if os.path.exists(file_path.replace('.csv', '.parquet')):
+            survival_df = pd.read_parquet(file_path.replace('.csv', '.parquet'))
+            print(f"Loaded preprocessed data from {file_path.replace('.csv', '.parquet')}")
+            return survival_df
+    except Exception as e:
+        print(f"Error loading Parquet data: {e}")
+
     try:
         # Load the combined dataframe
         survival_df = pd.read_csv(file_path)
@@ -683,13 +705,8 @@ if __name__ == "__main__":
         exit(1)
     
     # Load and process data
-    df = load_process_data()
+    load_process_data()
     
-    # Save the processed data
-    save_preprocessed_data(df)
-    
-    # Load the saved data
-    loaded_df = load_saved_data()
-    
-    # Display the loaded data
-    print(loaded_df.head())
+    df = load_saved_data('data/processed/survival_data_06058.csv')
+
+    print(df.head())

@@ -210,6 +210,7 @@ class SurvivalModel:
     def __init__(self, soil_type='clay'):
         self.model = KaplanMeierFitter()
         self.soil_type = soil_type
+        self.station = None  # Placeholder for station data
         self.is_fitted = False
         self.units = 'hours'  # Default unit for duration 
     
@@ -322,6 +323,7 @@ class FloodModel:
         self.is_fitted = False
         self.units = 'hours'
         self.soil_types = ["DG - Meltwater gravel", "DS - Meltwater sand"]
+        self.stations = []
         self.data = None
         self.available_soil_types = []
     

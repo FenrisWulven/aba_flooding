@@ -5,6 +5,18 @@ import geo_utils as gu
 import matplotlib.pyplot as plt
 import os
 
+
+"""
+From preprocess.py take the load_saved_data and load in the parquet files named by stations
+columns for files are: 
+        '{station}_WOG_{soil_type}'
+        '{station}_{soil_type}_observed"
+        '{station}_{soil_type}_TTE'
+        '{station}_{soil_type}_duration'
+Station er med på alle så husk at juster efter det
+"""
+
+
 # Import functions from the new preprocess module
 
 def load_models(path):
