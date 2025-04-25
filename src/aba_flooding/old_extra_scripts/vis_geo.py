@@ -315,7 +315,7 @@ def create_dynamic_heatmap(file_path, timesteps=10):
 
 # Run visualization
 if __name__ == "__main__":
-    terrain_file = "Terrain.geojson"
+    terrain_file = "Sediment.geojson"
     deck = visualize_terrain(terrain_file)
     
     # Save to HTML
