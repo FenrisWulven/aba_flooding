@@ -1,19 +1,12 @@
 import bokeh
-import pandas as pd
-import matplotlib.pyplot as plt
 import os
-import numpy as np
-from shapely.geometry import Point, Polygon
-from scipy.spatial import Voronoi
 import geopandas as gpd
 
 from geo_utils import load_terrain_data, gdf_to_geojson, wgs84_to_web_mercator, load_geojson, load_gpkg, load_terrain_data, gdf_to_geojson
 
 from train import train_all_models, load_models
 # Add import for preprocess module if needed
-from preprocess import preprocess_data_for_survival, load_process_data
 
-from bokeh.models import LinearColorMapper
 from bokeh.models import ColorBar
 
 from bokeh.palettes import Viridis256, Category10
@@ -66,104 +59,73 @@ def init_map():
     precipitation_layer = None
     station_layer = None
     
-    if denmark is not None:
-        # Create precipitation coverage areas
-        print("\n=== Creating precipitation coverage areas ===")
-        precip_coverage_gdf, stations_gdf = create_precipitation_coverage(denmark)
+    # Load coverage data
+    try:
+        print("Loading precipitation coverage data...")
+        coverage_data = load_geojson("precipitation_coverage.geojson")
         
-        if precip_coverage_gdf is not None and not precip_coverage_gdf.empty:
-            print(f"Successfully created coverage GeoDataFrame with {len(precip_coverage_gdf)} polygons")
-            # Create GeoJSON data source for precipitation coverage
-            precip_geojson = gdf_to_geojson(precip_coverage_gdf)
-            precip_source = GeoJSONDataSource(geojson=precip_geojson)
-            
-            # Create color mapper for precipitation values
-            if 'avg_precipitation' in precip_coverage_gdf.columns:
-                color_mapper = linear_cmap(
-                    field_name='avg_precipitation',
-                    palette=Category10[10],  # Use a different palette than flood risk
-                    low=precip_coverage_gdf['avg_precipitation'].min(),
-                    high=precip_coverage_gdf['avg_precipitation'].max()
-                )
-                
-                # Add precipitation coverage layer
-                precipitation_layer = p.patches(
-                    'xs', 'ys',
-                    source=precip_source,
-                    fill_color=color_mapper,
-                    fill_alpha=0.5,
-                    line_color='black',
-                    line_width=0.5,
-                    legend_label="Precipitation Coverage"
-                )
-                
-                # Add hover for precipitation data
-                precip_hover = HoverTool(
-                    tooltips=[
-                        ("Station ID", "@station_id"),
-                        ("Avg Precipitation", "@avg_precipitation{0.00} mm")
-                    ],
-                    renderers=[precipitation_layer]
-                )
-                p.add_tools(precip_hover)
+        if coverage_data is not None and not coverage_data.empty:
+            # Ensure data is in Web Mercator projection
+            if coverage_data.crs != "EPSG:3857":
+                coverage_mercator = coverage_data.to_crs(epsg=3857)
             else:
-                # Fallback if no precipitation data available
-                precipitation_layer = p.patches(
-                    'xs', 'ys',
-                    source=precip_source,
-                    fill_color='blue',
-                    fill_alpha=0.3,
-                    line_color='black',
-                    line_width=0.5,
-                    legend_label="Precipitation Coverage"
-                )
+                coverage_mercator = coverage_data
             
-            # Add station points if available
-            if stations_gdf is not None and not stations_gdf.empty:
-                try:
-                    # Determine the station ID column from the stations GeoDataFrame
-                    station_id_column = None
-                    for possible_id in ['id', 'station_id', 'station', 'name', 'station_name', 'temp_id']:
-                        if possible_id in stations_gdf.columns:
-                            station_id_column = possible_id
-                            break
-                    
-                    # Fallback to using the first column if no ID column is found
-                    if station_id_column is None:
-                        station_id_column = stations_gdf.columns[0]
-                        print(f"No obvious ID column found, using '{station_id_column}' as station ID")
-                    
-                    # Convert DataFrame columns to serializable types
-                    for col in stations_gdf.columns:
-                        if col != 'geometry':
-                            # Convert all columns to string to avoid serialization issues
-                            stations_gdf[col] = stations_gdf[col].astype(str)
-                    
-                    # Create a simplified copy with only necessary columns
-                    simple_stations = gpd.GeoDataFrame(
-                        {'station_id': stations_gdf[station_id_column].astype(str)},
-                        geometry=stations_gdf.geometry,
-                        crs=stations_gdf.crs
-                    )
-                    
-                    stations_geojson = gdf_to_geojson(simple_stations)
-                    stations_source = GeoJSONDataSource(geojson=stations_geojson)
-                    
-                    station_layer = p.circle(
-                        'x', 'y',
-                        source=stations_source,
-                        size=10,
-                        color='red',
-                        legend_label="Precipitation Stations"
-                    )
-                except Exception as station_error:
-                    print(f"Error adding station points: {station_error}")
-                    import traceback
-                    traceback.print_exc()
-                    station_layer = None
+            # Convert to GeoJSON for Bokeh
+            coverage_geojson = gdf_to_geojson(coverage_mercator)
+            coverage_source = GeoJSONDataSource(geojson=coverage_geojson)
+            
+            # Add precipitation coverage polygons
+            precipitation_layer = p.patches(
+                'xs', 'ys',
+                source=coverage_source,
+                fill_color='blue',
+                fill_alpha=0.2,
+                line_color='blue',
+                line_width=1,
+                legend_label="Precipitation Coverage"
+            )
+            
+            # Create a hover tool for precipitation areas
+            precip_hover = HoverTool(
+                tooltips=[
+                    ("Station ID", "@station_id"),
+                    ("Avg Precipitation", "@avg_precipitation{0.0} mm")
+                ],
+                renderers=[precipitation_layer]
+            )
+            p.add_tools(precip_hover)
+            
+            # Extract station points (centroids of coverage areas) for visualization
+            stations_gdf = gpd.GeoDataFrame(
+                coverage_mercator.copy(),
+                geometry=coverage_mercator.geometry.centroid,
+                crs=coverage_mercator.crs
+            )
+            
+            # Convert station points to GeoJSON
+            stations_geojson = gdf_to_geojson(stations_gdf)
+            stations_source = GeoJSONDataSource(geojson=stations_geojson)
+            
+            # Add station points
+            station_layer = p.circle(
+                'x', 'y',
+                source=stations_source,
+                size=8,
+                color='blue',
+                fill_alpha=1.0,
+                line_color='white',
+                line_width=1
+            )
+            
+            print(f"Successfully loaded precipitation coverage with {len(coverage_mercator)} areas")
         else:
-            print("ERROR: Failed to create precipitation coverage areas")
-
+            print("No precipitation coverage data found or it's empty")
+    except Exception as e:
+        print(f"Failed to load precipitation coverage: {e}")
+        import traceback
+        traceback.print_exc()
+        
     # Add sediment layer if available
     sediment_layer = None
     if has_sediment_data:
@@ -193,7 +155,7 @@ def init_map():
             else:
                 print("Training new flood models...")
                 # Train models for all soil types
-                flood_model = train_all_models(soil_types)
+                flood_model = train_all_models(soil_types, stationId)
                 # Plot models for available soil types
                 #flood_model.plot_all(save=True)
 

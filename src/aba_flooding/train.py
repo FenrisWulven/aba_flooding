@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 import os
 
 # Import functions from the new preprocess module
-from preprocess import load_process_data, preprocess_data_for_survival, load_saved_data
 
 def load_models(path):
     """
@@ -68,10 +67,9 @@ def train_all_models(soiltypes):
             valid_soiltypes = available_soiltypes
         
         # Preprocess data for survival analysis using the function from preprocess module
-        survival_dfs = preprocess_data_for_survival(df, valid_soiltypes)
+        survival_dfs = load_saved_data()
         
-        # Save preprocessed data 
-        from preprocess import save_preprocessed_data
+        # Save preprocessed data
         save_preprocessed_data(survival_dfs, processed_data_path)
     
     # Initialize FloodModel with all requested soil types (even those without data)

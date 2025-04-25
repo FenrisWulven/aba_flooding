@@ -329,6 +329,7 @@ def create_full_coverage():
     else:
         print("No valid Denmark boundary found. Skipping precipitation coverage creation.")
         return None, None, None
+    
     return coverage_geojson,coverage_geojson_gdf, stations_gdf
 
 def sediment_types_for_station(stationId, precipitationCoverageStations, sedimentCoverage):
@@ -528,7 +529,23 @@ def calculate_water_on_ground(df, soil_types, absorbtions, station):
             durations.append(current_duration)
         
         # Time to event
-        
+        # Initialize TTE column with default maximum possible time
+        result_df[f'{station}_{soil_type}_TTE'] = len(result_df)  
+
+        # Identify indices where heavy rain (observed state) occurs
+        event_indices = result_df.index[result_df[f"{station}_{soil_type}_observed"] == 1].tolist()
+
+        # Calculate time to the next event for each observation
+        for i in range(len(event_indices) - 1):
+            current_event = event_indices[i]
+            next_event = event_indices[i + 1]
+            
+            # Assign TTE for observations between current and next event
+            result_df.loc[current_event:next_event - 1, f'{station}_{soil_type}_TTE'] = range(next_event - current_event, 0, -1)
+
+        # Set TTE to 0 for observations with heavy rain
+        result_df.loc[result_df[f"{station}_{soil_type}_observed"] == 1, f'{station}_{soil_type}_TTE'] = 0
+
 
         # Handle censoring (if the dataset ends with a dry spell)
         if current_duration > 0:

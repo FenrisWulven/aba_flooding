@@ -4,6 +4,7 @@ import geopandas
 import numpy as np
 import matplotlib.pyplot as plt
 
+# TODO: STATIONS!
 
 class SurvivalModel:
     def __init__(self, soil_type='clay'):
