@@ -105,6 +105,7 @@ events = events.astype(int)
 durations = df['TTE'].values  # Time to event (TTE) in hours
 
 
+
 # Build the neural network architecture for the Deep Cox PH model
 in_features = x.shape[1]
 hidden_layers = [32, 32]  # you can adjust hidden layer sizes

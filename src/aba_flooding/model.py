@@ -3,6 +3,206 @@ from lifelines import KaplanMeierFitter
 import geopandas
 import numpy as np
 import matplotlib.pyplot as plt
+import os
+import numpy as np
+import torch
+import torchtuples as tt
+from sklearn.preprocessing import StandardScaler
+from sklearn_pandas import DataFrameMapper
+from pycox.models import CoxPH
+from pycox.evaluation import EvalSurv
+
+
+class SurivalDeepCoxModel:
+    """
+    Deep Cox Proportional Hazards model wrapper using pycox and torchtuples.
+    """
+    def __init__(self, input_cols=None, hidden_layers=(32, 32), dropout=0.1,
+                 optimizer=torch.optim.Adam, device=None):
+        """
+        Parameters:
+        -----------
+        input_cols : list of str
+            List of column names to use as features.
+        hidden_layers : tuple of int
+            Sizes of hidden layers in the MLP.
+        dropout : float
+            Dropout rate.
+        optimizer : torch optimizer class
+            Optimizer for training.
+        device : torch.device or str
+            Device to train on ('cuda' or 'cpu'). If None, auto-detect.
+        """
+        self.input_cols = input_cols or []
+        self.hidden_layers = hidden_layers
+        self.dropout = dropout
+        self.optimizer_cls = optimizer
+        self.device = device or (torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu'))
+
+        # Placeholders
+        self.mapper = None
+        self.scaler = None
+        self.net = None
+        self.model = None
+        self.baseline_hazards_ = None
+        self.is_fitted = False
+
+    def _build_network(self, in_features):
+        return tt.practical.MLPVanilla(in_features, self.hidden_layers, 1, dropout=self.dropout)
+
+    def train(self, df, duration_col='TTE', event_col='heavy_rain', epochs=10, batch_size=32, verbose=True):
+        """
+        Train the Deep Cox PH model.
+        """
+        if df is None or df.empty:
+            raise ValueError("Training dataframe is empty.")
+        # Extract features, durations, and events
+        x_raw = df[self.input_cols].values.astype('float32')
+        durations = df[duration_col].values.astype('float32')
+        events = df[event_col].astype(int).values
+
+        # Scale inputs
+        self.scaler = StandardScaler()
+        x = self.scaler.fit_transform(x_raw)
+
+        # Build network
+        in_features = x.shape[1]
+        self.net = self._build_network(in_features).to(self.device)
+
+        # CoxPH model
+        self.model = CoxPH(self.net, optimizer=self.optimizer_cls)
+
+        # Fit model
+        self.model.fit(x, (durations, events), epochs=epochs, batch_size=batch_size, verbose=verbose)
+
+        # Compute baseline hazards
+        self.model.compute_baseline_hazards()
+        self.baseline_hazards_ = self.model.baseline_cumulative_hazards_
+
+        self.is_fitted = True
+        return self
+
+    def predict_surv_df(self, df_new):
+        """
+        Predict survival function DataFrame for new samples.
+
+        Returns a DataFrame indexed by time, with one column per sample.
+        """
+        if not self.is_fitted:
+            raise RuntimeError("Model must be trained or loaded before prediction.")
+        x_raw = df_new[self.input_cols].values.astype('float32')
+        x = self.scaler.transform(x_raw)
+        surv = self.model.predict_surv_df(x)
+        return surv
+
+    def predict_proba(self, df_new, times=None):
+        """
+        Predict event probability up to specified times for new data.
+
+        Parameters:
+        -----------
+        df_new : DataFrame of new samples
+        times : array-like
+            Time points at which to compute event probability.
+
+        Returns:
+        --------
+        np.ndarray : probabilities of event by each time for each sample.
+        """
+        surv = self.predict_surv_df(df_new)
+        if times is not None:
+            surv = surv.loc[times]
+        # event probability = 1 - survival
+        return 1 - surv.values
+
+    def predict_median(self, df_new):
+        """
+        Predict median survival time for each new sample.
+        """
+        surv = self.predict_surv_df(df_new)
+        # median survival: time when survival crosses 0.5
+        medians = surv.apply(lambda col: col[col <= 0.5].index[0] if any(col <= 0.5) else surv.index.max(), axis=0)
+        return medians.values
+
+    def plot_baseline(self, save_path=None):
+        """
+        Plot and optionally save the baseline survival curve.
+        """
+        if self.baseline_hazards_ is None:
+            raise RuntimeError("Baseline hazards not computed. Fit the model first.")
+        H0 = self.baseline_hazards_
+        S0 = np.exp(-H0)
+        plt.figure(figsize=(8, 5))
+        plt.step(S0.index, S0.values, where='post')
+        plt.title("Baseline Survival Curve")
+        plt.xlabel("Time")
+        plt.ylabel("Survival Probability")
+        plt.grid(True)
+        if save_path:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            plt.savefig(save_path)
+        else:
+            plt.show()
+
+    def save(self, path):
+        """
+        Save model state and scaler to disk.
+        """
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        # save torch network
+        torch.save(self.net.state_dict(), path)
+        # save scaler
+        scaler_path = path + '.scaler.pkl'
+        pd.to_pickle(self.scaler, scaler_path)
+
+    def load(self, path):
+        """
+        Load model state and scaler from disk.
+        """
+        # load scaler
+        scaler_path = path + '.scaler.pkl'
+        self.scaler = pd.read_pickle(scaler_path)
+        # rebuild network
+        in_features = len(self.input_cols)
+        self.net = self._build_network(in_features).to(self.device)
+        self.net.load_state_dict(torch.load(path, map_location=self.device))
+        self.net.eval()
+        # rebuild model wrapper
+        self.model = CoxPH(self.net, optimizer=self.optimizer_cls)
+        self.model.compute_baseline_hazards()
+        self.baseline_hazards_ = self.model.baseline_cumulative_hazards_
+        self.is_fitted = True
+        return self
+
+    def evaluate(self, df, duration_col='TTE', event_col='heavy_rain'):
+        """
+        Evaluate concordance index on a dataset.
+        """
+        durations = df[duration_col].values.astype('float32')
+        events = df[event_col].astype(int).values
+        surv = self.predict_surv_df(df)
+        ev = EvalSurv(surv, durations, events, censor_surv='km')
+        return ev.concordance_td()
+
+    def plot_sample_curves(self, df_new, n_samples=5, save_path=None):
+        """
+        Plot individual survival curves for first n_samples.
+        """
+        surv = self.predict_surv_df(df_new)
+        times = surv.index
+        plt.figure(figsize=(10, 6))
+        for i in range(min(n_samples, surv.shape[1])):
+            plt.step(times, surv.iloc[:, i], where='post', label=f"Sample {i+1}")
+        plt.title("Survival Curves")
+        plt.xlabel("Time")
+        plt.ylabel("Survival Probability")
+        plt.legend()
+        plt.grid(True)
+        if save_path:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            plt.savefig(save_path)
+        else:
+            plt.show()
 
 
 class SurvivalModel:
