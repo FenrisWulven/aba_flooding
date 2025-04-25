@@ -4,7 +4,6 @@ import geopandas
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Initially a KaplanMaier model. THe idea is to have 1 for each soiltype butwe might need to cpompromise as it does not handle non flooding well.
 
 class SurvivalModel:
     def __init__(self, soil_type='clay'):
