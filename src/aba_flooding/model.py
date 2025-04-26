@@ -324,9 +324,19 @@ class FloodModel:
         self.units = 'hours'
         self.soil_types = ["DG - Meltwater gravel", "DS - Meltwater sand"]
         self.stations = []
-        self.data = None
         self.available_soil_types = []
     
+    def add_station(station, survival_df, soiltypes):
+        """
+        
+        """
+        # TODO:
+        pass
+    
+    def save():
+        # TODO
+        pass
+
     def train(self, data, survival_dfs=None, duration_column='duration', event_column='observed'):
         """
         Train the survival models for each soil type.
@@ -342,8 +352,7 @@ class FloodModel:
         event_column : str
             Name of event observation column in each survival df
         """
-        self.data = data
-        self.available_soil_types = []
+        # TODO: fix to work with the new stuff
         
         # If survival dataframes are provided, use them directly
         if survival_dfs and isinstance(survival_dfs, dict):
@@ -411,6 +420,7 @@ class FloodModel:
         --------
         GeoDataFrame : Original geodata with added predictions column
         """
+        # TODO: Update to new stuff
         if not self.is_fitted:
             raise RuntimeError("Model must be trained before making predictions")
             
@@ -464,25 +474,7 @@ class FloodModel:
         
         return geodata
     
-    def plot_all(self, save=False, output_dir='reports/figures/'):
-        """Plot survival functions for all soil types."""
-        if not self.is_fitted:
-            raise RuntimeError("Model must be trained before plotting")
-        
-        for soil_type, model in self.models.items():
-            plt.figure(figsize=(10, 6))
-            model.plot()
-            plt.title(f"Survival Function for {soil_type}")
-            plt.xlabel("Duration (hours)")
-            plt.ylabel("Survival Probability")
-            plt.grid()
-            if save:
-                # make the soil type safe for saving by changing '/' to '_'
-                soil_type_safe = soil_type.replace('/', '_')
-                plt.savefig(f"{output_dir}{soil_type_safe}_survival_function.png")
-            else:
-                plt.show()
-    
     def load(path):
         # Takes a pickle object and loads it
+        #TODO:
         pass

@@ -18,7 +18,6 @@ def voronoi_finite_polygons_2d(vor, radius=None):
     new_vertices = vor.vertices.tolist()
     
     center = vor.points.mean(axis=0)
-    # Fix for NumPy 2.0: Use np.ptp instead of .ptp() method
     radius = np.ptp(vor.points, axis=0).max() * 2 if radius is None else radius
     
     # Construct a map of all ridges for a given point
@@ -29,7 +28,7 @@ def voronoi_finite_polygons_2d(vor, radius=None):
     
     # Reconstruct infinite regions
     for p1, region in enumerate(vor.point_region):
-        # Skip points that don't have any ridges (fixes KeyError)
+        # Skip points that don't have any ridges
         if p1 not in all_ridges:
             print(f"Skipping point {p1} which has no ridges")
             continue
@@ -76,7 +75,6 @@ def voronoi_finite_polygons_2d(vor, radius=None):
 def create_precipitation_coverage(denmark_gdf):
     """Create Voronoi polygons for precipitation stations that cover Denmark without overlap."""
     try:
-        print("\n=== Creating precipitation coverage areas ===")
         # Load precipitation data - stations are rows with longitude and latitude columns
         print("Loading precipitation data...")
         station_data = pd.read_parquet('data/raw/dmi_stations.parquet')
@@ -236,99 +234,46 @@ def create_precipitation_coverage(denmark_gdf):
         return None, None
 
 def create_full_coverage():
-    # Get denmark
-    try:
-        # Instead of using deprecated geopandas.datasets.get_path
-        # Use alternative approach to get Denmark boundary
-        try:
-            # Method 1: Try to use geopandas with URL to Natural Earth data
-            import requests
-            from io import BytesIO
-            import zipfile
-            
-            # Download Natural Earth data
-            url = "https://www.naturalearthdata.com/http//www.naturalearthdata.com/download/110m/cultural/ne_110m_admin_0_countries.zip"
-            response = requests.get(url)
-            
-            if response.status_code == 200:
-                # Extract the zipfile
-                z = zipfile.ZipFile(BytesIO(response.content))
-                # Extract to a temporary location
-                temp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp")
-                os.makedirs(temp_dir, exist_ok=True)
-                z.extractall(temp_dir)
-                
-                # Find the shapefile
-                shp_path = None
-                for file in os.listdir(temp_dir):
-                    if file.endswith(".shp"):
-                        shp_path = os.path.join(temp_dir, file)
-                        break
-                
-                if shp_path:
-                    # Load and filter to Denmark
-                    world = gpd.read_file(shp_path)
-                    denmark = world[world.NAME == 'Denmark'].to_crs(epsg=3857)
-                    
-                    # Clean up temp directory
-                    for file in os.listdir(temp_dir):
-                        os.remove(os.path.join(temp_dir, file))
-                    os.rmdir(temp_dir)
-                else:
-                    raise FileNotFoundError("Shapefile not found in the downloaded zip")
-            else:
-                raise ConnectionError(f"Failed to download data: {response.status_code}")
-                
-        except Exception as inner_e:
-            print(f"Could not load Denmark boundary from Natural Earth: {inner_e}")
-            
-            # Method 2: Create a simplified Denmark boundary manually
-            print("Creating simplified Denmark boundary...")
-            # Approximate Denmark bounding box in EPSG:4326 (WGS84)
-            # These coordinates represent a rough bounding box around Denmark
-            denmark_coords = [
-                (8.0, 54.5),   # Southwest corner
-                (8.0, 57.8),   # Northwest corner
-                (13.0, 57.8),  # Northeast corner
-                (13.0, 54.5),  # Southeast corner
-                (8.0, 54.5)    # Close the polygon
-            ]
-            
-            # Create a polygon and convert to GeoDataFrame
-            denmark_polygon = Polygon(denmark_coords)
-            denmark = gpd.GeoDataFrame(
-                {'name': ['Denmark']}, 
-                geometry=[denmark_polygon], 
-                crs="EPSG:4326"
-            ).to_crs(epsg=3857)
-            print("Using simplified Denmark boundary")
-            
-    except Exception as e:
-        print(f"Could not load Denmark boundary: {e}")
-        denmark = None
+    # Create a simplified Denmark boundary manually
+    print("Creating simplified Denmark boundary...")
+    # Approximate Denmark bounding box in EPSG:4326 (WGS84)
+    # These coordinates represent a rough bounding box around Denmark
+    denmark_coords = [
+        (8.0, 54.5),   # Southwest 
+        (8.0, 57.8),   # Northwest 
+        (13.0, 57.8),  # Northeast 
+        (13.0, 54.5),  # Southeast
+        (8.0, 54.5)    
+    ]
+    
+    # Create a polygon and convert to GeoDataFrame
+    denmark_polygon = Polygon(denmark_coords)
+    denmark = gpd.GeoDataFrame(
+        {'name': ['Denmark']}, 
+        geometry=[denmark_polygon], 
+        crs="EPSG:4326"
+    ).to_crs(epsg=3857)
+    print("Using simplified Denmark boundary")
 
-    if denmark is not None:
-        # Create precipitation coverage areas
-        print("\n=== Creating precipitation coverage areas ===")
-        coverage_geojson_gdf, stations_gdf = create_precipitation_coverage(denmark)
-        
-        if coverage_geojson_gdf is not None and not coverage_geojson_gdf.empty:
-            print(f"Successfully created coverage GeoDataFrame with {len(coverage_geojson_gdf)} polygons")
-            # Create GeoJSON data source for precipitation coverage
-            coverage_geojson = gu.gdf_to_geojson(coverage_geojson_gdf)
-            coverage_geojson = gu.GeoJSONDataSource(geojson=coverage_geojson)
+    # Create station coverage areas
+    print("Creating station coverage areas")
+    coverage_geojson_gdf, stations_gdf = create_precipitation_coverage(denmark)
+    
+    if coverage_geojson_gdf is not None and not coverage_geojson_gdf.empty:
+        print(f"Successfully created coverage GeoDataFrame with {len(coverage_geojson_gdf)} polygons")
+        # Create GeoJSON data source for precipitation coverage
+        coverage_geojson = gu.gdf_to_geojson(coverage_geojson_gdf)
+        coverage_geojson = gu.GeoJSONDataSource(geojson=coverage_geojson)
 
-            print("Created GeoJSON data source for precipitation coverage")
-            # Save the GeoJSON data source
-            os.makedirs("data/processed", exist_ok=True)  # Create directory if it doesn't exist
-            coverage_geojson_gdf.to_file("data/raw/precipitation_coverage.geojson", driver="GeoJSON")
-            print("Saved coverage GeoDataFrame to data/raw/precipitation_coverage.geojson")
-        else:
-            print("No valid coverage areas created. Skipping GeoJSON creation.")
-            return None, None, None
+        print("Created GeoJSON data source for precipitation coverage")
+        # Save the GeoJSON data source
+        os.makedirs("data/processed", exist_ok=True)  # Create directory if it doesn't exist
+        coverage_geojson_gdf.to_file("data/raw/precipitation_coverage.geojson", driver="GeoJSON")
+        print("Saved coverage GeoDataFrame to data/raw/precipitation_coverage.geojson")
     else:
-        print("No valid Denmark boundary found. Skipping precipitation coverage creation.")
+        print("No valid coverage areas created. Skipping GeoJSON creation.")
         return None, None, None
+    
     
     return coverage_geojson,coverage_geojson_gdf, stations_gdf
 

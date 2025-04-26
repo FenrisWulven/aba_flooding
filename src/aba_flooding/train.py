@@ -4,7 +4,7 @@ import geopandas as gpd
 import geo_utils as gu
 import matplotlib.pyplot as plt
 import os
-
+from preprocess import load_saved_data
 
 """
 From preprocess.py take the load_saved_data and load in the parquet files named by stations
@@ -32,12 +32,10 @@ def load_models(path):
     --------
     FloodModel : Trained flood model
     """
-    import pickle
-    with open(path, 'rb') as f:
-        flood_model = pickle.load(f)
-    return flood_model
+    # TODO:
+    pass
 
-def train_all_models(soiltypes):
+def train_all_models():
     """
     Train survival models for all specified soil types.
     
@@ -50,67 +48,59 @@ def train_all_models(soiltypes):
     --------
     FloodModel : Trained flood model
     """
-    
-    processed_data_path = "data/processed/survival_data.csv"
-    
+    # Find all files in data/processed/
+    processed_data_path = os.path.join(os.getcwd(), "data/processed/")
+    station_names = []
+
+    # Check if directory exists
     if os.path.exists(processed_data_path):
-        print(f"Loading preprocessed survival data from {processed_data_path}")
-        # Use the function from the preprocess module
-        survival_dfs = load_saved_data(processed_data_path)
+        # List all files in the directory
+        files = os.listdir(processed_data_path)
         
-        # Load raw data for the model training
-        df = load_process_data()
-        
+        # Extract station names (part before the '-')
+        for file in files:
+            if file.endswith('.parquet'):
+                station_name = file.split('_')[2].strip()
+                if station_name and station_name not in station_names:
+                    station_names.append(station_name)
     else:
-        print("Preprocessing data and saving results...")
-        # Load and process data using the function from preprocess module
-        df = load_process_data()
-        
-        # Get the soil types we actually have data for in our absorption dictionary
-        available_soiltypes = list(df.filter(regex=r'.*observed$').columns)
-        available_soiltypes = [col.replace('observed', '') for col in available_soiltypes]
-        
-        print(f"Data available for soil types: {available_soiltypes}")
-        
-        # Filter to only include soil types that we have data for
-        valid_soiltypes = [st for st in soiltypes if st in available_soiltypes]
-        if not valid_soiltypes:
-            print("Warning: None of the requested soil types have data. Using all available soil types.")
-            valid_soiltypes = available_soiltypes
-        
-        # Preprocess data for survival analysis using the function from preprocess module
-        survival_dfs = load_saved_data()
-        
-        # Save preprocessed data
-        save_preprocessed_data(survival_dfs, processed_data_path)
-    
-    # Initialize FloodModel with all requested soil types (even those without data)
+        print(f"Directory {processed_data_path} does not exist")
+
+    print(f"Found {len(station_names)} stations: {station_names}")
+
     floodModel = md.FloodModel()
-    floodModel.soil_types = soiltypes
-    
-    # Train the FloodModel directly with survival dataframes
-    floodModel.train(data=df, survival_dfs=survival_dfs, 
-                     duration_column='duration', event_column='observed')
-    
-    #print(f"Successfully trained models for {len(floodModel.available_soil_types)} soil types")
-    
-    # Save the trained model
-    import pickle
-    os.makedirs(os.path.dirname(os.path.join(os.getcwd(), "models/")), exist_ok=True)
-    with open(os.path.join(os.getcwd(), "models/flood_models.pkl"), 'wb') as f:
-        pickle.dump(floodModel, f)
-    print(f"Saved trained model to models/flood_models.pkl")
-    
-    # Return just the flood model
+
+
+    # For each station
+    for station in station_names:
+        # Load the data for the station
+        station_data_path = os.path.join(processed_data_path, f"survival_data_{station}.parquet")   
+        survival_df = load_saved_data(station_data_path)
+
+        # extract the soil types from the dataframe
+        soiltypes = []
+        for column in list(survival_df.columns[1:]):
+            # Check if the soil type is already in the flood model
+            soiltype = column.split('_')[1]
+            if soiltype != 'WOG':
+                soiltypes.append(soiltype)
+            if soiltype not in floodModel.available_soil_types and soiltype != 'WOG':
+                floodModel.available_soil_types.append(soiltype)
+
+        # Create and train models for the floodmodel (station)
+        floodModel.add_station(station, survival_df, soiltypes)
+
+    floodModel.save()
+
     return floodModel
+    
 
 from lifelines import KaplanMeierFitter
 
 if __name__ == "__main__":
     # Example usage
-    soil_types = ["DG - Meltwater gravel", "DS - Meltwater sand"]
     
-    flood_model = train_all_models(soil_types)
+    flood_model = train_all_models()
     print("Flood model trained successfully.")
     print("Available soil types:", flood_model.available_soil_types)
     print("Trained models:", list(flood_model.models.keys()))
