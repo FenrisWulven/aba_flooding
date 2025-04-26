@@ -1,6 +1,6 @@
 import pandas as pd
 from lifelines import KaplanMeierFitter
-import geopandas
+# import geopandas
 import numpy as np
 import matplotlib.pyplot as plt
 import os
@@ -11,7 +11,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn_pandas import DataFrameMapper
 from pycox.models import CoxPH
 from pycox.evaluation import EvalSurv
-
+import joblib
 
 class SurivalDeepCoxModel:
     """
@@ -316,6 +316,62 @@ class SurvivalModel:
         plt.grid()
         plt.savefig(f"{self.soil_type}_survival_function.png")
 
+    def save(self, path):
+        """
+        Save the fitted Kaplan-Meier model to disk.
+        
+        Parameters:
+        -----------
+        path : str
+            File path where the model should be saved
+        
+        Returns:
+        --------
+        self : SurvivalModel
+            Returns self for method chaining
+        """
+        if not self.is_fitted:
+            raise RuntimeError("Model must be trained before saving")
+        
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        
+        # Save model and metadata
+        model_data = {
+            'model': self.model,
+            'soil_type': self.soil_type,
+            'station': self.station,
+            'units': self.units,
+            'is_fitted': self.is_fitted
+        }
+        pd.to_pickle(model_data, path)
+        return self
+    
+    def load(self, path):
+        """
+        Load a fitted Kaplan-Meier model from disk.
+        
+        Parameters:
+        -----------
+        path : str
+            File path to the saved model
+            
+        Returns:
+        --------
+        self : SurvivalModel
+            Returns self with loaded model
+        """
+        # Load model and metadata
+        model_data = pd.read_pickle(path)
+        
+        # Restore model attributes
+        self.model = model_data['model']
+        self.soil_type = model_data['soil_type']
+        self.station = model_data['station']
+        self.is_fitted = model_data['is_fitted']
+        self.units = model_data['units']
+        
+        return self
 
 class FloodModel:
     def __init__(self):
@@ -326,155 +382,308 @@ class FloodModel:
         self.stations = []
         self.available_soil_types = []
     
-    def add_station(station, survival_df, soiltypes):
+    def add_station(self, station, survival_df, soiltypes):
         """
-        
-        """
-        # TODO:
-        pass
-    
-    def save():
-        # TODO
-        pass
-
-    def train(self, data, survival_dfs=None, duration_column='duration', event_column='observed'):
-        """
-        Train the survival models for each soil type.
+        Add station data to the flood model and train survival models for each soil type.
         
         Parameters:
         -----------
-        data : pandas.DataFrame
-            Original processed dataframe (can be None if survival_dfs is provided)
-        survival_dfs : dict, optional
-            Dictionary mapping soil types to their survival dataframes
-        duration_column : str
-            Name of duration column in each survival df
-        event_column : str
-            Name of event observation column in each survival df
-        """
-        # TODO: fix to work with the new stuff
-        
-        # If survival dataframes are provided, use them directly
-        if survival_dfs and isinstance(survival_dfs, dict):
-            for soil_type, survival_df in survival_dfs.items():
-                if len(survival_df) > 0:
-                    #print(f"Training model for {soil_type} using provided survival dataframe")
-                    model = SurvivalModel(soil_type=soil_type)
-                    model.train(survival_df, duration_column, event_column)
-                    self.models[soil_type] = model
-                    self.available_soil_types.append(soil_type)
-                else:
-                    print(f"Warning: Empty survival dataframe for soil type '{soil_type}'")
-        
-        # Legacy approach using the original data format
-        elif data is not None:
-            for soil_type in self.soil_types:
-                # Correctly form the full column names
-                column_duration = f"{soil_type}{duration_column}"
-                column_event = f"{soil_type}{event_column}"
-                
-                #print(f"Looking for columns: {column_duration} and {column_event}")
-                
-                if column_duration in data.columns and column_event in data.columns:
-                    #print(f"Training model for {soil_type} using columns {column_duration} and {column_event}")
-                    # Create subset with only the needed columns
-                    subset_df = data[[column_duration, column_event]].rename(
-                        columns={column_duration: 'duration', column_event: 'observed'})
-                    
-                    model = SurvivalModel(soil_type=soil_type)
-                    model.train(subset_df, 'duration', 'observed')
-                    self.models[soil_type] = model
-                    self.available_soil_types.append(soil_type)
-                else:
-                    print(f"Warning: No training data found for soil type '{soil_type}'")
-        else:
-            raise ValueError("Either data or survival_dfs must be provided")
-            
-        # Handle any missing soil types with default models
-        for soil_type in self.soil_types:
-            if soil_type not in self.models:
-                #print(f"Creating default model for soil type '{soil_type}'")
-                default_model = SurvivalModel(soil_type=soil_type)
-                # Use an existing model if available
-                if len(self.models) > 0:
-                    some_model = next(iter(self.models.values()))
-                    self.models[soil_type] = some_model
-                else:
-                    self.models[soil_type] = default_model
-
-        self.is_fitted = True
-        return self
-    
-    def predict_proba(self, geodata, year):
-        """
-        Predict probability of rain occurring by the given year for each soil type.
-        
-        Parameters:
-        -----------
-        geodata : GeoDataFrame
-            GeoDataFrame containing soil types and their geometries
-        year : int
-            Year to predict probability for
+        station : str
+            Station identifier
+        survival_df : pandas.DataFrame
+            DataFrame containing survival data for the station
+        soiltypes : list
+            List of soil types to train models for this station
             
         Returns:
         --------
-        GeoDataFrame : Original geodata with added predictions column
+        self : FloodModel
+            Returns self for method chaining
         """
-        # TODO: Update to new stuff
-        if not self.is_fitted:
-            raise RuntimeError("Model must be trained before making predictions")
+        if station not in self.stations:
+            self.stations.append(station)
             
-        predictions = {}
-        prediction_stats = []
-        
-        # Iterate through each soil type in our models
-        for soil_type, model in self.models.items():
-            try:
-                # Get the raw prediction
-                raw_prediction = model.predict(year)
+        # Create models for each soil type in this station
+        for soil_type in soiltypes:
+            # Create column names based on pattern in the dataframe
+            duration_column = f"{station}_{soil_type}_duration"
+            event_column = f"{station}_{soil_type}_observed"
+            
+            # Check if needed columns exist
+            if duration_column in survival_df.columns and event_column in survival_df.columns:
+                # Filter out any missing values
+                valid_data = survival_df[[duration_column, event_column]].dropna()
                 
-                # Store raw prediction for debugging
-                predictions[soil_type] = raw_prediction
-                prediction_stats.append({
-                    'soil_type': soil_type,
-                    'year': year,
-                    'prediction': raw_prediction
-                })
-                
-                #print(f"Soil {soil_type}, Year {year}: Prediction = {raw_prediction:.4f}")
-            except Exception as e:
-                print(f"Error predicting for soil type {soil_type}: {str(e)}")
-                predictions[soil_type] = 0.5  # Default value on error
+                if len(valid_data) > 0:
+                    # Create a model for this station-soil combination
+                    model_key = f"{station}_{soil_type}"
+                    
+                    # Create and train the model
+                    model = SurvivalModel(soil_type=soil_type)
+                    model.station = station
+                    model.train(
+                        valid_data.rename(columns={
+                            duration_column: 'duration',
+                            event_column: 'observed'
+                        }),
+                        'duration', 
+                        'observed'
+                    )
+                    
+                    # Add to our models dictionary
+                    self.models[model_key] = model
+                    
+                    # Add to available soil types if not already there
+                    if soil_type not in self.available_soil_types:
+                        self.available_soil_types.append(soil_type)
+                    
+                    print(f"Trained model for station {station}, soil type {soil_type} with {len(valid_data)} observations")
+                else:
+                    print(f"No valid data for station {station}, soil type {soil_type}")
+            else:
+                print(f"Missing columns for station {station}, soil type {soil_type}")
         
-        # Print summary statistics
-        if prediction_stats:
-            pred_values = [p['prediction'] for p in prediction_stats]
-            if pred_values:
-                print(f"Year {year} prediction stats: min={min(pred_values):.4f}, "
-                      f"max={max(pred_values):.4f}, avg={sum(pred_values)/len(pred_values):.4f}")
-        
-        # Add predictions to the GeoDataFrame
-        column_name = f'predictions_{year}'
-        geodata[column_name] = geodata['sediment'].map(predictions)
-        
-        # Store raw probability values before percentage conversion
-        geodata[f'{column_name}_raw'] = geodata[column_name].copy()
-        
-        # Handle missing soil types
-        missing_soil_types = geodata.loc[geodata[column_name].isna(), 'sediment'].unique()
-        if len(missing_soil_types) > 0:
-            #print(f"No predictions for soil types: {missing_soil_types}")
-            # Set default values that increase with year but never reach 100%
-            default_value = min(0.2 + 0.05 * year, 0.7)
-            geodata[column_name].fillna(default_value, inplace=True)
-            geodata[f'{column_name}_raw'].fillna(default_value, inplace=True)
-        
-        # Convert to percentage for visualization
-        geodata[column_name] = geodata[column_name] * 100
-        
-        return geodata
+        # Mark as fitted if we have any models
+        if self.models:
+            self.is_fitted = True
+            
+        return self
     
-    def load(path):
-        # Takes a pickle object and loads it
-        #TODO:
-        pass
+    def save(self, path, split_by_station=True):
+        """
+        Save the FloodModel to disk.
+        
+        Parameters:
+        -----------
+        path : str
+            File path where the model should be saved
+        split_by_station : bool
+            If True, save each station's models in a separate file
+            
+        Returns:
+        --------
+        self : FloodModel
+            Returns self for method chaining
+        """
+        if not self.is_fitted:
+            raise RuntimeError("Model must be trained before saving")
+        
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        
+        # Split storage by station
+        if split_by_station and len(self.models) > 0:
+            # Extract base directory and filename without extension
+            base_dir = os.path.dirname(path)
+            base_name = os.path.splitext(os.path.basename(path))[0]
+            
+            # Create stations directory
+            stations_dir = os.path.join(base_dir, f"{base_name}_stations")
+            os.makedirs(stations_dir, exist_ok=True)
+            
+            print(f"Starting split save: {len(self.stations)} stations with {len(self.models)} models...")
+            
+            # Group models by station
+            station_models = {}
+            for model_key, model in self.models.items():
+                station = model_key.split('_')[0]
+                if station not in station_models:
+                    station_models[station] = {}
+                station_models[station][model_key] = model
+            
+            # Create a metadata model that references station files
+            meta_model = {
+                'is_fitted': True,
+                'units': self.units,
+                'soil_types': self.soil_types,
+                'stations': self.stations,
+                'available_soil_types': self.available_soil_types,
+                'station_paths': {}  # Will store paths to station model files
+            }
+            
+            # Save each station separately
+            saved_files = 0
+            for station, models in station_models.items():
+                station_path = os.path.join(stations_dir, f"station_{station}.joblib")
+                
+                # Display progress every 10 stations
+                if saved_files % 10 == 0:
+                    print(f"Saving station {saved_files}/{len(station_models)}: {station} with {len(models)} models...")
+                    
+                # Save station models with joblib
+                joblib.dump(models, station_path, compress=3)
+                
+                # Store the relative path in metadata
+                meta_model['station_paths'][station] = os.path.relpath(station_path, base_dir)
+                saved_files += 1
+                
+            # Save the metadata file
+            print(f"Saving metadata to {path}...")
+            joblib.dump(meta_model, path, compress=3)
+            print(f"Successfully saved {saved_files} station files and metadata")
+            
+        else:
+            # Traditional single-file save
+            print(f"Starting to save {len(self.models)} models to {path}...")
+            model_data = {
+                'models': self.models,
+                'is_fitted': self.is_fitted,
+                'units': self.units,
+                'soil_types': self.soil_types,
+                'stations': self.stations,
+                'available_soil_types': self.available_soil_types
+            }
+            joblib.dump(model_data, path, compress=3)
+            print(f"Successfully saved model to {path}")
+            
+        return self
+
+    def load(self, path, lazy_load=True):
+        """
+        Load a saved FloodModel from disk.
+        
+        Parameters:
+        -----------
+        path : str
+            File path to the saved model
+        lazy_load : bool
+            If True and model was saved with split_by_station=True, 
+            only load station models when requested
+            
+        Returns:
+        --------
+        self : FloodModel
+            Returns self with loaded models
+        """
+        print(f"Loading model from {path}...")
+        
+        # Try to load model data
+        model_data = joblib.load(path)
+        
+        # Check if this is a split model (metadata file)
+        if isinstance(model_data, dict) and 'station_paths' in model_data:
+            # This is a split model - load metadata
+            self.is_fitted = model_data.get('is_fitted', False)
+            self.units = model_data.get('units', 'hours')
+            self.soil_types = model_data.get('soil_types', [])
+            self.stations = model_data.get('stations', [])
+            self.available_soil_types = model_data.get('available_soil_types', [])
+            
+            # Get base directory for relative paths
+            base_dir = os.path.dirname(path)
+            
+            if lazy_load:
+                # Create a proxy function for each station that will load data when needed
+                self.models = {}
+                print(f"Lazy-loading enabled: Referenced {len(model_data['station_paths'])} stations")
+                
+                # Store the station paths for later loading
+                self._station_paths = {
+                    station: os.path.join(base_dir, rel_path) 
+                    for station, rel_path in model_data['station_paths'].items()
+                }
+            else:
+                # Load all station models immediately
+                self.models = {}
+                total_stations = len(model_data['station_paths'])
+                print(f"Loading all {total_stations} station models...")
+                
+                for i, (station, rel_path) in enumerate(model_data['station_paths'].items()):
+                    station_path = os.path.join(base_dir, rel_path)
+                    if i % 10 == 0:
+                        print(f"Loading station {i+1}/{total_stations}: {station}...")
+                    
+                    try:
+                        # Load the station models
+                        station_models = joblib.load(station_path)
+                        # Add to the main models dictionary
+                        self.models.update(station_models)
+                    except Exception as e:
+                        print(f"Error loading station {station}: {e}")
+        else:
+            # Traditional single-file model
+            self.models = model_data.get('models', {})
+            self.is_fitted = model_data.get('is_fitted', False)
+            self.units = model_data.get('units', 'hours')
+            self.soil_types = model_data.get('soil_types', [])
+            self.stations = model_data.get('stations', [])
+            self.available_soil_types = model_data.get('available_soil_types', [])
+        
+        print(f"Model loaded with {len(self.stations)} stations")
+        return self
+
+    def get_station_models(self, station):
+        """
+        Get all models for a specific station.
+        Will load from disk if using lazy loading.
+        
+        Parameters:
+        -----------
+        station : str
+            Station identifier
+            
+        Returns:
+        --------
+        dict : Dictionary of models for the station
+        """
+        # Check if we're using lazy loading and need to load this station
+        if hasattr(self, '_station_paths') and station in self._station_paths:
+            # Station not loaded yet, load it now
+            station_path = self._station_paths[station]
+            print(f"Loading station {station} models from {station_path}...")
+            
+            try:
+                # Load the station models
+                station_models = joblib.load(station_path)
+                # Add to the main models dictionary
+                self.models.update(station_models)
+                # Return the loaded models for this station
+                return {k: v for k, v in station_models.items()}
+            except Exception as e:
+                print(f"Error loading station {station}: {e}")
+                return {}
+        
+        # If not lazy loading or already loaded, filter existing models
+        return {k: v for k, v in self.models.items() if k.startswith(f"{station}_")}
+
+    def load_station(self, station, stations_dir):
+        """
+        Load models for a specific station from the stations directory.
+        
+        Parameters:
+        -----------
+        station : str
+            Station identifier
+        stations_dir : str
+            Directory containing station model files
+            
+        Returns:
+        --------
+        dict : Dictionary of loaded models for this station
+        """
+        # Try different filename patterns
+        file_patterns = [
+            os.path.join(stations_dir, f"{station}.joblib"),
+            os.path.join(stations_dir, f"station_{station}.joblib")
+        ]
+        
+        loaded_models = {}
+        for file_path in file_patterns:
+            if os.path.exists(file_path):
+                try:
+                    print(f"Loading station models from {file_path}")
+                    station_models = joblib.load(file_path)
+                    
+                    # Add models to the main models dictionary
+                    if isinstance(station_models, dict):
+                        for model_key, model in station_models.items():
+                            self.models[model_key] = model
+                            loaded_models[model_key] = model
+                    
+                    # Return the loaded models
+                    return loaded_models
+                except Exception as e:
+                    print(f"Error loading station file {file_path}: {e}")
+        
+        print(f"No valid model file found for station {station} in {stations_dir}")
+        return {}

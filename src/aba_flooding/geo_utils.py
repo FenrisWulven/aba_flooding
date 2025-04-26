@@ -4,11 +4,11 @@ import pandas as pd
 import numpy as np
 from bokeh.models import GeoJSONDataSource, LinearColorMapper
 from bokeh.palettes import Viridis256
-import geopandas as gpd
 import os
 from pathlib import Path
 from pyproj import Transformer
 from shapely.ops import transform
+import fiona
 
 # WIll take the a model and geodata and apply the survival function on the data so it is in geojson format for the map
 
@@ -23,15 +23,49 @@ def load_geojson(file_name):
     """Load a GeoJSON file from the data directory."""
     data_dir = get_data_dir()
     file_path = os.path.join(data_dir, file_name)
-    return gpd.read_file(file_path)
+    try:
+        # First try standard geopandas approach
+        return gpd.read_file(file_path)
+    except Exception as e:
+        print(f"Standard GeoPandas read failed: {e}")
+        try:
+            # Try alternate method with fiona
+            import fiona
+            with fiona.open(file_path, 'r') as src:
+                crs = src.crs
+                features = list(src)
+            
+            # Convert to GeoDataFrame
+            import shapely.geometry
+            geoms = [shapely.geometry.shape(feature['geometry']) for feature in features]
+            properties = [feature['properties'] for feature in features]
+            
+            # Create a GeoDataFrame
+            gdf = gpd.GeoDataFrame(properties, geometry=geoms, crs=crs)
+            return gdf
+        except Exception as e2:
+            print(f"Alternative loading also failed: {e2}")
+            raise e
 
 def load_gpkg(file_name, layer=None):
     """Load a GeoPackage file from the data directory, with optional layer name."""
     data_dir = get_data_dir()
     file_path = os.path.join(data_dir, file_name)
+    
     if layer:
         return gpd.read_file(file_path, layer=layer)
-    return gpd.read_file(file_path)
+    else:
+        # Try to get available layers first
+        try:
+            layers = fiona.listlayers(file_path)
+            if len(layers) > 0:
+                print(f"Available layers in {file_name}: {layers}")
+                return gpd.read_file(file_path, layer=layers[0])
+            else:
+                return gpd.read_file(file_path)
+        except Exception as e:
+            print(f"Error getting layers: {e}")
+            return gpd.read_file(file_path)
 
 def load_terrain_data(file_name):
     """Load terrain data from GeoJSON or GPKG file."""

@@ -1,6 +1,8 @@
 import pandas as pd
-import perculation_mapping as pm
-import geo_utils as gu
+import aba_flooding.perculation_mapping as pm
+import aba_flooding.geo_utils as gu
+# import perculation_mapping as pm
+# import geo_utils as gu
 from shapely.geometry import Point, Polygon
 from scipy.spatial import Voronoi
 import numpy as np
@@ -219,11 +221,42 @@ def create_precipitation_coverage(denmark_gdf):
         print(f"Successfully created coverage areas for {len(coverage_gdf)} stations")
         
         # Save to file for inspection
+        
+        os.makedirs("data/processed", exist_ok=True)  # Create directory if it doesn't exist
+        os.makedirs("data/raw", exist_ok=True)  # Ensure raw directory exists too
+        
+        # Try different methods to save the GeoJSON file
         try:
             coverage_gdf.to_file("data/raw/precipitation_coverage.geojson", driver="GeoJSON")
-            print("Saved coverage areas to data/raw/precipitation_coverage.geojson")
-        except Exception as e:
-            print(f"Could not save coverage areas: {e}")
+            print("Saved coverage GeoDataFrame to data/raw/precipitation_coverage.geojson")
+        except AttributeError as e:
+            if "module 'pyogrio' has no attribute 'write_dataframe'" in str(e):
+                print("Encountered pyogrio error, trying alternative method...")
+                try:
+                    # Try using fiona driver directly
+                    import fiona
+                    coverage_gdf.to_file(
+                        "data/raw/precipitation_coverage.geojson", 
+                        driver="GeoJSON",
+                        engine="fiona"
+                    )
+                    print("Saved coverage GeoDataFrame using fiona engine")
+                except Exception as fiona_error:
+                    print(f"Fiona method failed: {fiona_error}")
+                    try:
+                        # Last resort: manually create GeoJSON
+                        import json
+                        geojson_dict = json.loads(gu.gdf_to_geojson(coverage_gdf))
+                        with open("data/raw/precipitation_coverage.geojson", "w") as f:
+                            json.dump(geojson_dict, f)
+                        print("Saved coverage GeoDataFrame using manual JSON conversion")
+                    except Exception as json_error:
+                        print(f"Manual JSON conversion failed: {json_error}")
+                        print("WARNING: Could not save precipitation coverage file")
+            else:
+                print(f"Could not save coverage areas: {e}")
+        except Exception as general_error:
+            print(f"Could not save coverage areas: {general_error}")
         
         return coverage_gdf, stations_gdf
     
@@ -268,8 +301,40 @@ def create_full_coverage():
         print("Created GeoJSON data source for precipitation coverage")
         # Save the GeoJSON data source
         os.makedirs("data/processed", exist_ok=True)  # Create directory if it doesn't exist
-        coverage_geojson_gdf.to_file("data/raw/precipitation_coverage.geojson", driver="GeoJSON")
-        print("Saved coverage GeoDataFrame to data/raw/precipitation_coverage.geojson")
+        os.makedirs("data/raw", exist_ok=True)  # Ensure raw directory exists too
+        
+        # Try different methods to save the GeoJSON file
+        try:
+            coverage_geojson_gdf.to_file("data/raw/precipitation_coverage.geojson", driver="GeoJSON")
+            print("Saved coverage GeoDataFrame to data/raw/precipitation_coverage.geojson")
+        except AttributeError as e:
+            if "module 'pyogrio' has no attribute 'write_dataframe'" in str(e):
+                print("Encountered pyogrio error, trying alternative method...")
+                try:
+                    # Try using fiona driver directly
+                    import fiona
+                    coverage_geojson_gdf.to_file(
+                        "data/raw/precipitation_coverage.geojson", 
+                        driver="GeoJSON",
+                        engine="fiona"
+                    )
+                    print("Saved coverage GeoDataFrame using fiona engine")
+                except Exception as fiona_error:
+                    print(f"Fiona method failed: {fiona_error}")
+                    try:
+                        # Last resort: manually create GeoJSON
+                        import json
+                        geojson_dict = json.loads(gu.gdf_to_geojson(coverage_geojson_gdf))
+                        with open("data/raw/precipitation_coverage.geojson", "w") as f:
+                            json.dump(geojson_dict, f)
+                        print("Saved coverage GeoDataFrame using manual JSON conversion")
+                    except Exception as json_error:
+                        print(f"Manual JSON conversion failed: {json_error}")
+                        print("WARNING: Could not save precipitation coverage file")
+            else:
+                print(f"Could not save coverage areas: {e}")
+        except Exception as general_error:
+            print(f"Could not save coverage areas: {general_error}")
     else:
         print("No valid coverage areas created. Skipping GeoJSON creation.")
         return None, None, None
@@ -526,7 +591,7 @@ def load_process_data():
         print(f"Loaded precipitation coverage with {len(precipitationCoverageStations)} stations")
         
         print("Loading sediment coverage...")
-        sedimentCoverage = gpd.read_file("data/raw/Sediment.geojson")
+        sedimentCoverage = gpd.read_file("data/raw/Sediment_wgs84.geojson")
         print(f"Loaded sediment coverage with {len(sedimentCoverage)} features")
 
         # Get absorption rates for each soil type
@@ -644,7 +709,7 @@ if __name__ == "__main__":
         exit(1)
     
     # Load sediment
-    sedimentCoverage = gu.load_geojson("Sediment.geojson")
+    sedimentCoverage = gu.load_geojson("Sediment.wgs84.geojson")
     if sedimentCoverage is None:
         print("No valid sediment data loaded. Exiting.")
         exit(1)
