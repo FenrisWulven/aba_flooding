@@ -709,7 +709,7 @@ if __name__ == "__main__":
         exit(1)
     
     # Load sediment
-    sedimentCoverage = gu.load_geojson("Sediment.wgs84.geojson")
+    sedimentCoverage = gu.load_geojson("Sediment_wgs84.geojson")
     if sedimentCoverage is None:
         print("No valid sediment data loaded. Exiting.")
         exit(1)
