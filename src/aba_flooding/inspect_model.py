@@ -1,9 +1,9 @@
 import os
-from aba_flooding.model import FloodModel
+from model import FloodModel
 import matplotlib.pyplot as plt
 import numpy as np
 
-from aba_flooding.train import process_station_file
+from train import process_station_file
 
 def inspect_model(train = False):
     """Inspect the trained flood model."""
@@ -263,12 +263,12 @@ def plot_survival_curves(station_models, station_id):
     print("== Plotting complete ==")
 
 import pandas as pd
-from lifelines import KaplanMeierFitter
-
+from lifelines import KaplanMeierFitter, WeibullFitter, ExponentialFitter, LogNormalFitter
+from sksurv.nonparametric import kaplan_meier_estimator
 
 if __name__ == "__main__":
 
-    inspect_model(True)
+    #inspect_model(True)
 
     df = pd.read_parquet("data/processed/survival_data_05109.parquet")
 
@@ -276,8 +276,18 @@ if __name__ == "__main__":
 
     km = KaplanMeierFitter()
     
-    km.fit(durations=df['05109_HI_duration'],event_observed=df['05109_HI_observed'])
+    km.fit(durations=df['05109_HI_TTE'],event_observed=df['05109_HI_observed'])
     
+    df['05109_HI_observed'] = df['05109_HI_observed'].astype(bool)
+
+    time, survival_prob, conf_int = kaplan_meier_estimator(df['05109_HI_observed'], df['05109_HI_duration'], conf_type="log-log")
+    plt.step(time, survival_prob, where="post")
+    plt.fill_between(time, conf_int[0], conf_int[1], alpha=0.25, step="post")
+    plt.ylim(0, 1)
+    plt.ylabel(r"est. probability of survival $\hat{S}(t)$")
+    plt.xlabel("time $t$")
+    plt.savefig("km_plot.png")
+
     print(df['05109_HI_observed'].value_counts())
     print(df['05109_HI_duration'].describe())
     event_rows = df[df['05109_HI_observed'] == 1]
@@ -293,12 +303,12 @@ if __name__ == "__main__":
     plt.figure(figsize=(10, 6))
     km.plot_cumulative_density()
     plt.grid(True)
-    plt.title("Cumulative Hazard")
-    plt.savefig('cumulative_hazard.png')
+    plt.title("Cumulative density")
+    plt.savefig('cumulative_density.png')
 
     # Check for issues in the duration data
     plt.figure(figsize=(10, 6))
-    plt.hist(df['05109_HI_duration'], bins=50)
+    plt.hist(df['05109_HI_duration'], bins=50) 
     plt.title("Distribution of Duration Values") 
     plt.savefig('duration_hist.png')
 
@@ -315,3 +325,84 @@ if __name__ == "__main__":
     print(len(df2['05109']))
     print(len(df))
     #inspect_model()
+
+
+
+    # DIAGNOSTIC SECTION
+    print("\n=== DIAGNOSTIC INFORMATION ===")
+    event_rate = df['05109_HI_observed'].mean()
+    print(f"Event rate: {event_rate:.4f} ({event_rate*100:.2f}%)")
+
+    # SOLUTION 1: Try plotting with CONSISTENT variables
+    plt.figure(figsize=(10, 6))
+    km_tte = KaplanMeierFitter()
+    km_tte.fit(durations=df['05109_HI_TTE'], event_observed=df['05109_HI_observed'])
+    km_tte.plot_cumulative_density()
+    plt.grid(True)
+    plt.title("Cumulative Incidence (using TTE values)")
+    plt.savefig('cumulative_density_tte.png')
+
+    # SOLUTION 2: Try duration with events correctly marked
+    plt.figure(figsize=(10, 6))
+    km_dur = KaplanMeierFitter()
+    km_dur.fit(durations=df['05109_HI_duration'], event_observed=df['05109_HI_observed'])
+    km_dur.plot_cumulative_density()
+    plt.grid(True)
+    plt.title("Cumulative Incidence (using duration values)")
+    plt.savefig('cumulative_density_duration.png')
+
+
+    # SOLUTION 4: Check for time window issues
+    evenHI_by_time = df['05109_HI_observed'].rolling(window=1000).mean()
+    plt.figure(figsize=(10, 6))
+    plt.plot(evenHI_by_time)
+    plt.title("Event Rate Over Time (Moving Average)")
+    plt.savefig('event_rate_time.png')
+
+    # Create sksurv-compatible structured array
+    y = np.zeros(len(df), dtype=[('event', bool), ('time', float)])
+    y['event'] = df['05109_HI_observed'].values
+    y['time'] = df['05109_HI_duration'].values
+
+    print("\nEvent time analysis:")
+    event_durations = df[df['05109_HI_observed'] == 1]['05109_HI_duration'].describe()
+    print(f"Event durations: {event_durations}")
+    print(f"Max duration overall: {df['05109_HI_duration'].max()}")
+    print(f"Events at max duration: {sum((df['05109_HI_observed'] == 1) & (df['05109_HI_duration'] == df['05109_HI_duration'].max()))}")
+    
+
+    test = WeibullFitter()
+    test.fit(df['05109_HI_duration'], df['05109_HI_observed'])
+    plt.figure(figsize=(10, 6))
+    test.plot_cumulative_density()
+    plt.grid(True)
+    plt.title("Cumulative Incidence (Weibull)")
+    plt.savefig('cumulative_density_weibull.png')
+    print(f"Weibull parameters: {test.lambda_}, {test.rho_}")
+    print(f"Weibull median survival time: {test.median_survival_time_}")
+    print(f"Weibull AIC: {test.AIC_}")
+    print(f"Weibull BIC: {test.BIC_}")
+
+    test = ExponentialFitter()
+    test.fit(df['05109_HI_duration'], df['05109_HI_observed'])
+    plt.figure(figsize=(10, 6))
+    test.plot_cumulative_density()
+    plt.grid(True)
+    plt.title("Cumulative Incidence (Exponential)")
+    plt.savefig('cumulative_density_exponential.png')
+    print(f"Exponential parameters: {test.lambda_}")
+    print(f"Exponential median survival time: {test.median_survival_time_}")
+    print(f"Exponential AIC: {test.AIC_}")
+    print(f"Exponential BIC: {test.BIC_}")
+
+    test = LogNormalFitter()
+    test.fit(df['05109_HI_duration'], df['05109_HI_observed'])
+    plt.figure(figsize=(10, 6))
+    test.plot_cumulative_density()
+    plt.grid(True)
+    plt.title("Cumulative Incidence (LogNormal)")
+    plt.savefig('cumulative_density_lognormal.png')
+    print(f"LogNormal parameters: {test.mu_}, {test.sigma_}")
+    print(f"LogNormal median survival time: {test.median_survival_time_}")
+    print(f"LogNormal AIC: {test.AIC_}")
+    print(f"LogNormal BIC: {test.BIC_}")

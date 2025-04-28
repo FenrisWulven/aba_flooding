@@ -1,6 +1,6 @@
 import pandas as pd
-import aba_flooding.perculation_mapping as pm
-import aba_flooding.geo_utils as gu
+import perculation_mapping as pm
+import geo_utils as gu
 # import perculation_mapping as pm
 # import geo_utils as gu
 from shapely.geometry import Point, Polygon
@@ -516,7 +516,7 @@ def calculate_water_on_ground(df, soil_types, absorbtions, station):
     
     # Parallel WOG calculation for each soil type using vectorized operations where possible
     for soil_type, data in soil_type_data.items():
-        rate = data['rate'] * 100
+        rate = data['rate']
         wog = data['wog_array']
         
         # First time step
@@ -527,37 +527,41 @@ def calculate_water_on_ground(df, soil_types, absorbtions, station):
             wog[i] = max(0, wog[i-1] * (1 - rate) + precip_array[i])
         
         # Calculate observed state (> threshold)
-        data['observed'] = (wog > 5).astype(int)
-        
-        # Calculate durations and TTEs (less vectorizable due to dependencies)
-        current_duration = 0
-        durations = np.zeros(n, dtype=int)
-        
-        # First pass: Calculate durations
-        for i in range(n):
-            if data['observed'][i] == 0:  # Dry period
-                current_duration += 1
-            else:  # Wet period - reset counter
-                current_duration = 0
-            durations[i] = current_duration
-        
-        data['duration'] = durations
+        # wog_window = np.convolve(wog, np.ones(3)/3, mode='same')  # 3-hour window
+        # data['observed'] = (wog_window > 5).astype(int)
+
+        data['observed'] = (wog > 5).astype(int) # CHANGE HERE!
         
         # Find event indices
         event_indices = np.where(data['observed'] == 1)[0]
-        
-        # Calculate TTE using vectorized approach
+        # First pass: Calculate time until next event (survival analysis approach)
+        tte = np.full(n, n)  # Default to maximum for censored observations
+        durations = np.full(n, n)  # Default to maximum
+
+        # Mark events with time-to-event = 0
+        tte[event_indices] = 0
+
+        # For each pair of events, calculate time between them
+        for i in range(len(event_indices)-1):
+            start_idx = event_indices[i]
+            end_idx = event_indices[i+1]
+            time_between = end_idx - start_idx
+            
+            # Fill in counting up from 1 at non-event to event time at event
+            for j in range(start_idx+1, end_idx):
+                tte[j] = end_idx - j
+            
+            # Store the duration (time until next event)
+            durations[start_idx:end_idx] = np.arange(1, time_between+1)
+
+        # For observations after the last event, they're all censored
         if len(event_indices) > 0:
-            tte = np.full(n, n)  # Default to maximum
-            tte[event_indices] = 0  # Events have TTE=0
-            
-            # For periods between events, calculate TTE
-            for i in range(len(event_indices) - 1):
-                start_idx = event_indices[i]
-                end_idx = event_indices[i+1]
-                tte[start_idx:end_idx] = np.arange(end_idx - start_idx, 0, -1)
-            
-            data['tte'] = tte
+            last_event = event_indices[-1]
+            durations[last_event+1:] = np.arange(1, n-last_event)
+
+        # Store calculated values
+        data['tte'] = tte
+        data['duration'] = durations
             
         # Add columns to the dictionary
         new_columns[f'{station}_WOG_{soil_type}'] = data['wog_array']
@@ -601,7 +605,7 @@ def load_process_data():
         
         # Process only a subset of stations for debugging if needed
         #stations_to_process = df.columns[:2]  # Uncomment to process only first 2 stations
-        stations_to_process = ['05109'] # df.columns
+        stations_to_process = df.columns
 
         
         # For each station in the data, calculate the water on ground for each soil type
@@ -710,23 +714,16 @@ def load_saved_data(file_path="data/processed/survival_data.csv"):
 
 if __name__ == "__main__":
     # Coverage
-    # coverage_geojson, coverage_geojson_gdf, stations_gdf = create_full_coverage()
-    # if coverage_geojson is None:
-    #     print("No valid coverage data created. Exiting.")
-    #     exit(1)
+    coverage_geojson, coverage_geojson_gdf, stations_gdf = create_full_coverage()
+    if coverage_geojson is None:
+        print("No valid coverage data created. Exiting.")
+        exit(1)
     
     # Load sediment
-<<<<<<< HEAD
-    # sedimentCoverage = gu.load_geojson("Sediment_wgs84.geojson")
-    # if sedimentCoverage is None:
-    #     print("No valid sediment data loaded. Exiting.")
-    #     exit(1)
-=======
     sedimentCoverage = gu.load_geojson("Sediment_wgs84.geojson")
     if sedimentCoverage is None:
         print("No valid sediment data loaded. Exiting.")
         exit(1)
->>>>>>> 5aae0c6d51af4c740c2381fcb82bb7372ebcdc5a
     
     # Load and process data
     load_process_data()

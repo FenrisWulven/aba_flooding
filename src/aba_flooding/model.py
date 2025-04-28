@@ -1,5 +1,5 @@
 import pandas as pd
-from lifelines import KaplanMeierFitter
+from lifelines import KaplanMeierFitter, ExponentialFitter
 # import geopandas
 import numpy as np
 import matplotlib.pyplot as plt
@@ -206,7 +206,7 @@ class SurivalDeepCoxModel:
 
 class SurvivalModel:
     def __init__(self, soil_type='clay'):
-        self.model = KaplanMeierFitter()
+        self.model = ExponentialFitter()
         self.soil_type = soil_type
         self.station = None  # Placeholder for station data
         self.is_fitted = False
@@ -685,3 +685,95 @@ class FloodModel:
         
         print(f"No valid model file found for station {station} in {stations_dir}")
         return {}
+    
+    def predict_proba(self, geodata, station_coverage, year):
+        """"""
+        if not self.is_fitted:
+            raise RuntimeError("Model must be trained before making predictions")
+        
+        result_geodata = geodata.copy()
+        column_name = f'predictions_{year}'
+
+        soil_type_col = 'sediment'
+        if soil_type_col not in result_geodata.columns:
+            # Try to find a suitable column for soil types
+            possible_cols = [col for col in result_geodata.columns 
+                        if 'soil' in col.lower() or 'type' in col.lower()]
+            if possible_cols:
+                soil_type_col = possible_cols[0]
+            else:
+                print("Could not find soil type column in geodata")
+                return geodata
+         # Initialize prediction column
+        result_geodata[column_name] = None
+        
+        # If no station coverage provided, use all available stations with equal weight
+        # Spatial join to find which station coverage area each geometry falls into
+        # Ensure both GeoDataFrames have the same CRS
+        if result_geodata.crs != station_coverage.crs:
+            print(f"Converting station_coverage from {station_coverage.crs} to {result_geodata.crs}")
+            station_coverage = station_coverage.to_crs(result_geodata.crs)
+        
+        # Get the station ID column
+        station_id_col = 'station_id'
+        if station_id_col not in station_coverage.columns:
+            # Try to find a suitable station ID column
+            possible_cols = [col for col in station_coverage.columns 
+                           if 'station' in col.lower() and 'id' in col.lower()]
+            if possible_cols:
+                station_id_col = possible_cols[0]
+            else:
+                print("Could not find station ID column in station_coverage")
+                return geodata
+        
+        # Process each row in geodata
+        for idx, row in result_geodata.iterrows():
+            geometry = row.geometry
+            soil_type = row[soil_type_col]
+            
+            # Find which station coverage area this geometry intersects with
+            intersecting_stations = station_coverage[station_coverage.intersects(geometry)]
+            
+            if not intersecting_stations.empty:
+                # Extract first element if it's a compound soil type description
+                if isinstance(soil_type, str) and ' ' in soil_type:
+                    simple_type = soil_type.split(' ')[0]
+                else:
+                    simple_type = soil_type
+                    
+                # Get predictions from all intersecting stations and take the average
+                predictions = []
+                for _, station_row in intersecting_stations.iterrows():
+                    station = station_row[station_id_col]
+                    model_key = f"{station}_{simple_type}"
+                    
+                    # If using lazy loading, ensure station models are loaded
+                    if hasattr(self, '_station_paths') and station in self._station_paths:
+                        self.get_station_models(station)
+                    
+                    if model_key in self.models:
+                        try:
+                            model = self.models[model_key]
+                            predictions.append(model.predict(year))
+                        except Exception as e:
+                            print(f"Error predicting for {model_key}: {e}")
+                
+                # Calculate the average prediction if we found any models
+                if predictions:
+                    result_geodata.at[idx, column_name] = sum(predictions) / len(predictions)
+                else:
+                    # No models found for this soil type at these stations, assign a default value
+                    default_value = min(0.2 + 0.05 * year, -0.7)
+                    result_geodata.at[idx, column_name] = default_value
+            else:
+                # Geometry doesn't intersect with any station coverage area
+                default_value = min(0.2 + 0.05 * year, -0.7)
+                result_geodata.at[idx, column_name] = default_value
+    
+        # Store raw probability values before percentage conversion
+        result_geodata[f'{column_name}_raw'] = result_geodata[column_name].copy()
+        
+        # Convert to percentage for visualization
+        result_geodata[column_name] = result_geodata[column_name] * 100
+        
+        return result_geodata

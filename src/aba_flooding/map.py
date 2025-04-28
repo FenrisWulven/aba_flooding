@@ -1,7 +1,6 @@
 import bokeh
 import os
 import geopandas as gpd
-import fiona
 
 from aba_flooding.geo_utils import load_terrain_data, gdf_to_geojson, wgs84_to_web_mercator, load_geojson, load_gpkg, load_terrain_data, gdf_to_geojson
 from aba_flooding.model import FloodModel
@@ -184,7 +183,7 @@ def init_map():
             stations_source = GeoJSONDataSource(geojson=stations_geojson)
             
             # Add station points
-            station_layer = p.circle(
+            station_layer = p.scatter(
                 'x', 'y',
                 source=stations_source,
                 size=8,
@@ -238,53 +237,18 @@ def init_map():
                 print("Visualization will proceed without flood prediction layer")
                 flood_model = None
 
-            # Add basic prediction method if it doesn't exist
-            if flood_model is not None and not hasattr(flood_model, 'predict_proba'):
-                print("Adding basic predict_proba method to FloodModel")
-                def basic_predict_proba(self, gdf, year=None):
-                    """
-                    Basic implementation to add prediction columns to the GeoDataFrame.
-                    """
-                    print(f"Using basic prediction method for year {year}")
-                    result_gdf = gdf.copy()
-                    
-                    # For each polygon in the GeoDataFrame, add a prediction
-                    # This is a placeholder implementation
-                    for i, row in result_gdf.iterrows():
-                        soil_type = row['sediment'].split(' ')[0] if ' ' in row['sediment'] else row['sediment']
-                        
-                        # Try to find a matching model
-                        prediction = 0
-                        for station in self.stations:
-                            model_key = f"{station}_{soil_type}"
-                            if model_key in self.models:
-                                try:
-                                    model = self.models[model_key]
-                                    if hasattr(model, 'predict_proba'):
-                                        time_point = year if year is not None else 1
-                                        surv_prob = model.predict_proba(time_point)
-                                        prediction = (1 - surv_prob) * 100  # Convert to flood probability percentage
-                                        break
-                                except Exception as e:
-                                    continue
-                        
-                        # Add the prediction column for this year
-                        result_gdf.at[i, f'predictions_{year}'] = prediction
-                        
-                    return result_gdf
-                
-                # Add the method to the model instance
-                import types
-                flood_model.predict_proba = types.MethodType(basic_predict_proba, flood_model)
-
             # Only proceed with prediction if we have a valid model
             flood_source = None
             if flood_model is not None:
                 # Precompute predictions for all years
                 sediment_with_predictions = sediment_mercator.copy()
                 for year in range(0, 11):
+                    if year % 3 == 0:
+                        print(f"Making predictions for year {year}...")
+                    else:
+                        continue
                     try:
-                        sediment_with_predictions = flood_model.predict_proba(sediment_with_predictions, year)
+                        sediment_with_predictions = flood_model.predict_proba(sediment_with_predictions, stations_gdf, year)
                     except Exception as e:
                         print(f"Error making predictions for year {year}: {e}")
                         # If predictions fail, add placeholder columns to avoid errors
