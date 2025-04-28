@@ -527,7 +527,7 @@ def calculate_water_on_ground(df, soil_types, absorbtions, station):
             wog[i] = max(0, wog[i-1] * (1 - rate) + precip_array[i])
         
         # Calculate observed state (> threshold)
-        data['observed'] = (wog > 10).astype(int)
+        data['observed'] = (wog > 5).astype(int)
         
         # Calculate durations and TTEs (less vectorizable due to dependencies)
         current_duration = 0
@@ -585,7 +585,8 @@ def load_process_data():
         print("Loading precipitation data...")
         df = pd.read_parquet("data/raw/precipitation_imputed_data.parquet")
         print(f"Loaded precipitation data with columns: {df.columns.tolist()[:5]}...")
-        
+        df = df.clip(lower=0, upper=60)
+
         print("Loading precipitation coverage stations...")
         precipitationCoverageStations = gpd.read_file("data/raw/precipitation_coverage.geojson")
         print(f"Loaded precipitation coverage with {len(precipitationCoverageStations)} stations")
@@ -600,16 +601,20 @@ def load_process_data():
         
         # Process only a subset of stations for debugging if needed
         #stations_to_process = df.columns[:2]  # Uncomment to process only first 2 stations
-        stations_to_process = df.columns
+        stations_to_process = ['05109'] # df.columns
 
-        df.dropna(inplace=False)  # Drop rows with NaN values to avoid issues in calculations
-
+        
         # For each station in the data, calculate the water on ground for each soil type
         for station in stations_to_process:
             print(f"Processing station {station}...")
             df_station = df[[station]].copy()
             # Rename the column to 'Nedbor' (precipitation) for consistency
             df_station.rename(columns={station: 'Nedbor'}, inplace=True)
+
+            df_station.dropna(inplace=True)
+            if df_station.empty:
+                print(f"No data for station {station}, skipping...")
+                continue
             
             # Get soil types for this station
             sediment_types = sediment_types_for_station(station, precipitationCoverageStations, sedimentCoverage)
@@ -705,16 +710,16 @@ def load_saved_data(file_path="data/processed/survival_data.csv"):
 
 if __name__ == "__main__":
     # Coverage
-    coverage_geojson, coverage_geojson_gdf, stations_gdf = create_full_coverage()
-    if coverage_geojson is None:
-        print("No valid coverage data created. Exiting.")
-        exit(1)
+    # coverage_geojson, coverage_geojson_gdf, stations_gdf = create_full_coverage()
+    # if coverage_geojson is None:
+    #     print("No valid coverage data created. Exiting.")
+    #     exit(1)
     
     # Load sediment
-    sedimentCoverage = gu.load_geojson("Sediment_wgs84.geojson")
-    if sedimentCoverage is None:
-        print("No valid sediment data loaded. Exiting.")
-        exit(1)
+    # sedimentCoverage = gu.load_geojson("Sediment_wgs84.geojson")
+    # if sedimentCoverage is None:
+    #     print("No valid sediment data loaded. Exiting.")
+    #     exit(1)
     
     # Load and process data
     load_process_data()

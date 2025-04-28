@@ -272,17 +272,15 @@ if __name__ == "__main__":
 
     df = pd.read_parquet("data/processed/survival_data_05109.parquet")
 
-    df.dropna(inplace=False)
-
     print(df.columns)
 
     km = KaplanMeierFitter()
     
-    km.fit(durations=df['05109_ML_duration'],event_observed=df['05109_ML_observed'])
+    km.fit(durations=df['05109_HI_duration'],event_observed=df['05109_HI_observed'])
     
-    print(df['05109_ML_observed'].value_counts())
-    print(df['05109_ML_duration'].describe())
-    event_rows = df[df['05109_ML_observed'] == 1]
+    print(df['05109_HI_observed'].value_counts())
+    print(df['05109_HI_duration'].describe())
+    event_rows = df[df['05109_HI_observed'] == 1]
     print(f"\nFound {len(event_rows)} events")
     if len(event_rows) > 0:
         print("\nFirst 5 events:")
@@ -300,15 +298,20 @@ if __name__ == "__main__":
 
     # Check for issues in the duration data
     plt.figure(figsize=(10, 6))
-    plt.hist(df['05109_ML_duration'], bins=50)
+    plt.hist(df['05109_HI_duration'], bins=50)
     plt.title("Distribution of Duration Values") 
     plt.savefig('duration_hist.png')
 
     plt.figure()
-    plt.plot(df['05109_WOG_ML'])
+    plt.plot(df['05109_WOG_HI'])
     plt.savefig("ss21.png")
 
     plt.figure()
 
 
+    df2 = pd.read_parquet("data/raw/precipitation_imputed_data.parquet")
+    df2 = df2.clip(lower=0, upper=60)
+    print(df2['05109'].isnull().sum())
+    print(len(df2['05109']))
+    print(len(df))
     #inspect_model()
