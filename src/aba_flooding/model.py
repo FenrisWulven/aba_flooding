@@ -204,8 +204,6 @@ class SurivalDeepCoxModel:
         else:
             plt.show()
 
-# TODO: STATIONS!
-
 class SurvivalModel:
     def __init__(self, soil_type='clay'):
         self.model = KaplanMeierFitter()

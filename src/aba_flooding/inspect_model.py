@@ -3,19 +3,46 @@ from aba_flooding.model import FloodModel
 import matplotlib.pyplot as plt
 import numpy as np
 
-def inspect_model():
+from aba_flooding.train import process_station_file
+
+def inspect_model(train = False):
     """Inspect the trained flood model."""
     model_path = os.path.join("models", "flood_model.joblib")
     
-    if not os.path.exists(model_path):
-        print(f"Model file not found: {model_path}")
-        return
     
     print(f"Loading model from {model_path}...")
     try:
         # Create a FloodModel instance first, then call load with the path parameter
         model = FloodModel()
-        model.load(path=model_path)
+        if train:
+            print("Training the model...")
+            if train:
+                
+                # Fix: Pass string filename first, not the model object
+                station_file = "data/processed/survival_data_05005.parquet"
+                station_id = "05005"
+                station, station_models, timing = process_station_file(f"survival_data_{station_id}.parquet", 
+                                                                    os.path.dirname(station_file), 
+                                                                    False)
+                
+                # Only try to add models if they were successfully created
+                if station_models:
+                    for model_key, survival_model in station_models.items():
+                        model.models[model_key] = survival_model
+                    model.stations.append(station)
+                    
+                    # Update available soil types
+                    for model_key in station_models:
+                        soil_type = model_key.split('_')[1]
+                        if soil_type not in model.available_soil_types:
+                            model.available_soil_types.append(soil_type)
+            else:
+                print(f"No models were created for station {station_id}")
+        else:
+            if not os.path.exists(model_path):
+                print(f"Model file not found: {model_path}")
+                return
+            model.load(path=model_path)
         
         # Inspect specific station
         inspect_station(model, "05005")
@@ -235,5 +262,53 @@ def plot_survival_curves(station_models, station_id):
     
     print("== Plotting complete ==")
 
+import pandas as pd
+from lifelines import KaplanMeierFitter
+
+
 if __name__ == "__main__":
-    inspect_model()
+
+    inspect_model(True)
+
+    df = pd.read_parquet("data/processed/survival_data_05109.parquet")
+
+    df.dropna(inplace=False)
+
+    print(df.columns)
+
+    km = KaplanMeierFitter()
+    
+    km.fit(durations=df['05109_ML_duration'],event_observed=df['05109_ML_observed'])
+    
+    print(df['05109_ML_observed'].value_counts())
+    print(df['05109_ML_duration'].describe())
+    event_rows = df[df['05109_ML_observed'] == 1]
+    print(f"\nFound {len(event_rows)} events")
+    if len(event_rows) > 0:
+        print("\nFirst 5 events:")
+        print(event_rows.head())
+    else:
+        print("No events found! All observations are censored.")
+
+
+    # Try plotting the cumulative hazard (might show the pattern better)
+    plt.figure(figsize=(10, 6))
+    km.plot_cumulative_density()
+    plt.grid(True)
+    plt.title("Cumulative Hazard")
+    plt.savefig('cumulative_hazard.png')
+
+    # Check for issues in the duration data
+    plt.figure(figsize=(10, 6))
+    plt.hist(df['05109_ML_duration'], bins=50)
+    plt.title("Distribution of Duration Values") 
+    plt.savefig('duration_hist.png')
+
+    plt.figure()
+    plt.plot(df['05109_WOG_ML'])
+    plt.savefig("ss21.png")
+
+    plt.figure()
+
+
+    #inspect_model()

@@ -465,8 +465,8 @@ def gather_soil_types(purculation_mapping):
     # Take perculation Keys and the min and max / 2 and add to a dict
     soil_types = {}
     for key, value in purculation_mapping.items():
-        min = 0.000001 if value['min'] == 0 else value['min']
-        max = 0.999999 if value['max'] == 1 else value['max']
+        min = 0.0001 if value['min'] == 0 else value['min']
+        max = 0.9999 if value['max'] == 1 else value['max']
             
         soil_types[key] = (min + max) / 2
     return soil_types
@@ -505,7 +505,7 @@ def calculate_water_on_ground(df, soil_types, absorbtions, station):
         
     # Pre-allocate numpy arrays for all calculations to avoid memory allocations in loops
     for soil_type in valid_soil_types:
-        rate = absorbtions[soil_type]
+        rate = absorbtions[soil_type] 
         soil_type_data[soil_type] = {
             'rate': rate,
             'wog_array': np.zeros(n),
@@ -516,7 +516,7 @@ def calculate_water_on_ground(df, soil_types, absorbtions, station):
     
     # Parallel WOG calculation for each soil type using vectorized operations where possible
     for soil_type, data in soil_type_data.items():
-        rate = data['rate']
+        rate = data['rate'] * 100
         wog = data['wog_array']
         
         # First time step
@@ -601,6 +601,8 @@ def load_process_data():
         # Process only a subset of stations for debugging if needed
         #stations_to_process = df.columns[:2]  # Uncomment to process only first 2 stations
         stations_to_process = df.columns
+
+        df.dropna(inplace=False)  # Drop rows with NaN values to avoid issues in calculations
 
         # For each station in the data, calculate the water on ground for each soil type
         for station in stations_to_process:
@@ -709,7 +711,7 @@ if __name__ == "__main__":
         exit(1)
     
     # Load sediment
-    sedimentCoverage = gu.load_geojson("Sediment.wgs84.geojson")
+    sedimentCoverage = gu.load_geojson("Sediment_wgs84.geojson")
     if sedimentCoverage is None:
         print("No valid sediment data loaded. Exiting.")
         exit(1)
