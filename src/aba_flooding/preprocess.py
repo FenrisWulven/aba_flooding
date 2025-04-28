@@ -11,7 +11,7 @@ def load_process_data():
     """
     df = pd.read_csv("data/raw/Regn2004-2025.csv", sep=";")
     df['Dato'] = pd.to_datetime(df['Dato'], format='%d.%m.%Y')
-
+    df = df.clip(lower=0, upper=60)
     df['Tid'] = df.apply(lambda x: int(x['Tid'].split(':')[0]), axis=1)
     df['datetime'] = df['Dato'] + pd.to_timedelta(df['Tid'], unit='h')
     absorbtions = gather_soil_types(pm.percolation_rates_updated)
