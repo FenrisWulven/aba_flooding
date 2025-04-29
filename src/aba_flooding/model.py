@@ -747,9 +747,7 @@ class FloodModel:
                     station = station_row[station_id_col]
                     model_key = f"{station}_{simple_type}"
                     
-                    # If using lazy loading, ensure station models are loaded
-                    if hasattr(self, '_station_paths') and station in self._station_paths:
-                        self.get_station_models(station)
+                    
                     
                     if model_key in self.models:
                         try:
@@ -763,11 +761,11 @@ class FloodModel:
                     result_geodata.at[idx, column_name] = sum(predictions) / len(predictions)
                 else:
                     # No models found for this soil type at these stations, assign a default value
-                    default_value = min(0.2 + 0.05 * year, -0.7)
+                    default_value = min(0.2 + 0.05 * year, 0.0)
                     result_geodata.at[idx, column_name] = default_value
             else:
                 # Geometry doesn't intersect with any station coverage area
-                default_value = min(0.2 + 0.05 * year, -0.7)
+                default_value = min(0.2 + 0.05 * year, 0.0)
                 result_geodata.at[idx, column_name] = default_value
     
         # Store raw probability values before percentage conversion
