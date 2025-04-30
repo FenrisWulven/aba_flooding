@@ -118,6 +118,7 @@ def init_map():
             (10.8, 54.9)    # Close the polygon
         ])
         
+        target_crs = "EPSG:3857"
         # Make sure sediment data has correct CRS before filtering
         if sediment_data.crs is None:
             sediment_data.crs = "EPSG:4326"
