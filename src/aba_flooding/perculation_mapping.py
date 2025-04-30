@@ -89,6 +89,8 @@
 # # Example usage:
 # print(percolation_rates["DG"])  # Output: 0.3
 
+# https://structx.com/Soil_Properties_007.html
+
 
 # New dictionary with min and max percolation rates for Denmark soil types
 percolation_rates_updated = {
