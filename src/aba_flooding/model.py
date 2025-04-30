@@ -688,6 +688,7 @@ class FloodModel:
     
     def predict_proba(self, geodata, station_coverage, year):
         """"""
+        # Ensure the model is trained
         if not self.is_fitted:
             raise RuntimeError("Model must be trained before making predictions")
         
@@ -761,11 +762,11 @@ class FloodModel:
                     result_geodata.at[idx, column_name] = sum(predictions) / len(predictions)
                 else:
                     # No models found for this soil type at these stations, assign a default value
-                    default_value = min(0.2 + 0.05 * year, 0.0)
+                    default_value = min(0.2 + 0.05 * year, -0.2)
                     result_geodata.at[idx, column_name] = default_value
             else:
                 # Geometry doesn't intersect with any station coverage area
-                default_value = min(0.2 + 0.05 * year, 0.0)
+                default_value = min(0.2 + 0.05 * year, -0.2)
                 result_geodata.at[idx, column_name] = default_value
     
         # Store raw probability values before percentage conversion
@@ -775,3 +776,10 @@ class FloodModel:
         result_geodata[column_name] = result_geodata[column_name] * 100
         
         return result_geodata
+
+
+# Notebook
+# Model predict_proba
+# map
+# 
+#

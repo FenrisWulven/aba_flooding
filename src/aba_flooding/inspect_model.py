@@ -270,27 +270,16 @@ if __name__ == "__main__":
 
     #inspect_model(True)
 
-    df = pd.read_parquet("data/processed/survival_data_05109.parquet")
+    df = pd.read_parquet("data/processed/survival_data_06136.parquet")
 
     print(df.columns)
 
-    km = KaplanMeierFitter()
-    
-    km.fit(durations=df['05109_HI_TTE'],event_observed=df['05109_HI_observed'])
-    
-    df['05109_HI_observed'] = df['05109_HI_observed'].astype(bool)
+    df['06136_HG_observed'] = df['06136_HG_observed'].astype(bool)
 
-    time, survival_prob, conf_int = kaplan_meier_estimator(df['05109_HI_observed'], df['05109_HI_duration'], conf_type="log-log")
-    plt.step(time, survival_prob, where="post")
-    plt.fill_between(time, conf_int[0], conf_int[1], alpha=0.25, step="post")
-    plt.ylim(0, 1)
-    plt.ylabel(r"est. probability of survival $\hat{S}(t)$")
-    plt.xlabel("time $t$")
-    plt.savefig("km_plot.png")
 
-    print(df['05109_HI_observed'].value_counts())
-    print(df['05109_HI_duration'].describe())
-    event_rows = df[df['05109_HI_observed'] == 1]
+    print(df['06136_HG_observed'].value_counts())
+    print(df['06136_HG_duration'].describe())
+    event_rows = df[df['06136_HG_observed'] == 1]
     print(f"\nFound {len(event_rows)} events")
     if len(event_rows) > 0:
         print("\nFirst 5 events:")
@@ -298,22 +287,14 @@ if __name__ == "__main__":
     else:
         print("No events found! All observations are censored.")
 
-
-    # Try plotting the cumulative hazard (might show the pattern better)
-    plt.figure(figsize=(10, 6))
-    km.plot_cumulative_density()
-    plt.grid(True)
-    plt.title("Cumulative density")
-    plt.savefig('cumulative_density.png')
-
     # Check for issues in the duration data
     plt.figure(figsize=(10, 6))
-    plt.hist(df['05109_HI_duration'], bins=50) 
+    plt.hist(df['06136_HG_duration'], bins=50) 
     plt.title("Distribution of Duration Values") 
-    plt.savefig('duration_hist.png')
+    plt.savefig('duration_HGst.png')
 
     plt.figure()
-    plt.plot(df['05109_WOG_HI'])
+    plt.plot(df['06136_WOG_HG'])
     plt.savefig("ss21.png")
 
     plt.figure()
@@ -321,22 +302,21 @@ if __name__ == "__main__":
 
     df2 = pd.read_parquet("data/raw/precipitation_imputed_data.parquet")
     df2 = df2.clip(lower=0, upper=60)
-    print(df2['05109'].isnull().sum())
-    print(len(df2['05109']))
+    print(df2['06136'].isnull().sum())
+    print(len(df2['06136']))
     print(len(df))
     #inspect_model()
 
 
-
     # DIAGNOSTIC SECTION
     print("\n=== DIAGNOSTIC INFORMATION ===")
-    event_rate = df['05109_HI_observed'].mean()
+    event_rate = df['06136_HG_observed'].mean()
     print(f"Event rate: {event_rate:.4f} ({event_rate*100:.2f}%)")
 
     # SOLUTION 1: Try plotting with CONSISTENT variables
     plt.figure(figsize=(10, 6))
     km_tte = KaplanMeierFitter()
-    km_tte.fit(durations=df['05109_HI_TTE'], event_observed=df['05109_HI_observed'])
+    km_tte.fit(durations=df['06136_HG_TTE'], event_observed=df['06136_HG_observed'])
     km_tte.plot_cumulative_density()
     plt.grid(True)
     plt.title("Cumulative Incidence (using TTE values)")
@@ -345,7 +325,7 @@ if __name__ == "__main__":
     # SOLUTION 2: Try duration with events correctly marked
     plt.figure(figsize=(10, 6))
     km_dur = KaplanMeierFitter()
-    km_dur.fit(durations=df['05109_HI_duration'], event_observed=df['05109_HI_observed'])
+    km_dur.fit(durations=df['06136_HG_duration'], event_observed=df['06136_HG_observed'])
     km_dur.plot_cumulative_density()
     plt.grid(True)
     plt.title("Cumulative Incidence (using duration values)")
@@ -353,7 +333,7 @@ if __name__ == "__main__":
 
 
     # SOLUTION 4: Check for time window issues
-    evenHI_by_time = df['05109_HI_observed'].rolling(window=1000).mean()
+    evenHI_by_time = df['06136_HG_observed'].rolling(window=1000).mean()
     plt.figure(figsize=(10, 6))
     plt.plot(evenHI_by_time)
     plt.title("Event Rate Over Time (Moving Average)")
@@ -361,18 +341,18 @@ if __name__ == "__main__":
 
     # Create sksurv-compatible structured array
     y = np.zeros(len(df), dtype=[('event', bool), ('time', float)])
-    y['event'] = df['05109_HI_observed'].values
-    y['time'] = df['05109_HI_duration'].values
+    y['event'] = df['06136_HG_observed'].values
+    y['time'] = df['06136_HG_duration'].values
 
     print("\nEvent time analysis:")
-    event_durations = df[df['05109_HI_observed'] == 1]['05109_HI_duration'].describe()
+    event_durations = df[df['06136_HG_observed'] == 1]['06136_HG_duration'].describe()
     print(f"Event durations: {event_durations}")
-    print(f"Max duration overall: {df['05109_HI_duration'].max()}")
-    print(f"Events at max duration: {sum((df['05109_HI_observed'] == 1) & (df['05109_HI_duration'] == df['05109_HI_duration'].max()))}")
+    print(f"Max duration overall: {df['06136_HG_duration'].max()}")
+    print(f"Events at max duration: {sum((df['06136_HG_observed'] == 1) & (df['06136_HG_duration'] == df['06136_HG_duration'].max()))}")
     
 
     test = WeibullFitter()
-    test.fit(df['05109_HI_duration'], df['05109_HI_observed'])
+    test.fit(df['06136_HG_duration'], df['06136_HG_observed'])
     plt.figure(figsize=(10, 6))
     test.plot_cumulative_density()
     plt.grid(True)
@@ -384,7 +364,7 @@ if __name__ == "__main__":
     print(f"Weibull BIC: {test.BIC_}")
 
     test = ExponentialFitter()
-    test.fit(df['05109_HI_duration'], df['05109_HI_observed'])
+    test.fit(df['06136_HG_duration'], df['06136_HG_observed'])
     plt.figure(figsize=(10, 6))
     test.plot_cumulative_density()
     plt.grid(True)
@@ -396,7 +376,7 @@ if __name__ == "__main__":
     print(f"Exponential BIC: {test.BIC_}")
 
     test = LogNormalFitter()
-    test.fit(df['05109_HI_duration'], df['05109_HI_observed'])
+    test.fit(df['06136_HG_duration'], df['06136_HG_observed'])
     plt.figure(figsize=(10, 6))
     test.plot_cumulative_density()
     plt.grid(True)

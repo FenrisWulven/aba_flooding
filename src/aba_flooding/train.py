@@ -13,6 +13,9 @@ from lifelines import KaplanMeierFitter
 import multiprocessing
 from functools import partial
 
+###################################
+## PROCESS A SINGLE STATION FILE ##
+###################################
 def process_station_file(file, processed_data_path, profile=False):
     """
     Process a single station file - can be run in parallel
@@ -22,6 +25,8 @@ def process_station_file(file, processed_data_path, profile=False):
     tuple: (station ID, survival models dict, timing info dict)
     """
     try:
+        # Load the survival data from all available station files
+
         station_start_time = time.time()
         
         # Extract station ID from filename
@@ -41,8 +46,8 @@ def process_station_file(file, processed_data_path, profile=False):
                 'status': 'skipped',
                 'reason': 'empty data'
             }
-            
-        # Identify soil types in this dataframe
+ 
+        # Identify soil types within the station
         soil_types = set()
         for column in survival_df.columns:
             parts = column.split('_')
@@ -51,7 +56,7 @@ def process_station_file(file, processed_data_path, profile=False):
                 if parts[1] != "WOG":  # Skip WOG columns
                     soil_types.add(parts[1])
         
-        # Create station models
+        # Create a dictionary for all survival models within the station
         station_models = {}
         
         # Run profiling if enabled
@@ -83,7 +88,7 @@ def process_station_file(file, processed_data_path, profile=False):
                             'observed'
                         )
                         
-                        # Add to our local models dictionary
+                        # Add to our local models to dictionary
                         model_key = f"{station}_{soil_type}"
                         station_models[model_key] = model
             
@@ -98,13 +103,13 @@ def process_station_file(file, processed_data_path, profile=False):
             # Add station to the model without profiling
             train_start_time = time.time()
             
-            # Process each soil type
+            # Process each soil type within the station boundry
             for soil_type in soil_types:
                 # Create column names
                 duration_column = f"{station}_{soil_type}_duration"
                 event_column = f"{station}_{soil_type}_observed"
                 
-                # Check if columns exist
+                # Check if columns exist (ensure that everything worked so far)
                 if duration_column in survival_df.columns and event_column in survival_df.columns:
                     valid_data = survival_df[[duration_column, event_column]].dropna()
                     
@@ -129,7 +134,7 @@ def process_station_file(file, processed_data_path, profile=False):
         
         station_time = time.time() - station_start_time
         
-        # Prepare timing info
+        # Prepare timing info for profiling
         timing = {
             'station': station,
             'total_time': station_time,
@@ -149,6 +154,9 @@ def process_station_file(file, processed_data_path, profile=False):
         traceback.print_exc()
         return file, None, {'status': 'error', 'error': str(e)}
 
+##########################################
+## TRAINING ALL MODELS FOR ALL STATIONS ##
+##########################################
 def train_all_models(output_path="models/flood_model.pkl", profile=False, parallel=True, max_workers=None):
     """
     Train survival models for all stations and soil types from processed parquet files.
@@ -173,15 +181,16 @@ def train_all_models(output_path="models/flood_model.pkl", profile=False, parall
     timing_info = {'total': 0, 'stations': {}}
     
     # Find all files in data/processed/
+    # This is the designated destination for the survival data and will not change
     processed_data_path = os.path.join(os.getcwd(), "data/processed/")
     station_files = []
 
-    # Check if directory exists
+    # Check that data/processed/ exists if not then throw an error
     if os.path.exists(processed_data_path):
-        # List all files in the directory
+        # List all files in the directory (all available stations)
         files = os.listdir(processed_data_path)
         
-        # Filter for parquet files
+        # Filter for parquet files (making sure to only get preprocessed data)
         station_files = [f for f in files if f.startswith("survival_data_") and f.endswith(".parquet")]
         print(f"Found {len(station_files)} station data files")
     else:
@@ -191,16 +200,15 @@ def train_all_models(output_path="models/flood_model.pkl", profile=False, parall
     # Create a new FloodModel
     flood_model = md.FloodModel()
 
-    # Use parallel processing if enabled and more than one file
+    # Use parallel processing if enabled
     if parallel and len(station_files) > 1 and not profile:  # Skip parallel if profiling
         # Determine number of workers - default is based on physical cores when possible
         if max_workers is None:
             try:
                 import psutil
-                # Get physical cores (10 in your case) not logical processors (16)
+                # Get physical cores not logical cores as we need to read from disk
                 physical_cores = psutil.cpu_count(logical=False)
-                # Use physical cores minus 2 to leave room for system processes
-                max_workers = max(1, physical_cores - 2)
+                max_workers = max(1, physical_cores - 2) # Leave room for system
             except (ImportError, AttributeError):
                 # If psutil isn't available, use a conservative default (about 60% of logical processors)
                 max_workers = max(1, int(multiprocessing.cpu_count() * 0.6))
@@ -240,7 +248,7 @@ def train_all_models(output_path="models/flood_model.pkl", profile=False, parall
                 if isinstance(timing, dict) and 'station' in timing:
                     timing_info['stations'][station] = timing
     else:
-        # Process files sequentially (original method)
+        # Process files sequentially
         for file in station_files:
             station, models, timing = process_station_file(file, processed_data_path, profile)
             
@@ -276,7 +284,6 @@ def train_all_models(output_path="models/flood_model.pkl", profile=False, parall
         timing_info['total'] = total_time
 
     return flood_model, timing_info
-
 
 def print_timing_report(timing_info):
     """Print a formatted timing report from timing information."""
@@ -317,7 +324,6 @@ def print_timing_report(timing_info):
     print("="*60)
 
 
-# Example usage script
 if __name__ == "__main__":
     # Make sure the output directory exists
     os.makedirs("models", exist_ok=True)

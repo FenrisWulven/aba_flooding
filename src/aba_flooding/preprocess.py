@@ -620,7 +620,7 @@ def load_process_data(coverage_data=None, sediment_data=None):
         # check min and max values
 
 
-        #https://international.kk.dk/sites/default/files/2021-09/Cloudburst%20Management%20plan%202010.pdf?utm_source=chatgpt.com
+        #https://international.kk.dk/sites/default/files/2021-09/Cloudburst%20Management%20plan%202010.pdf
         # precipitation measured close to 100 mm in one hour.
 
         #https://web.archive.org/web/20140913151609/http://vejret.tv2.dk/artikel/id-32909558:et-af-de-kraftigste-regnvejr-nogensinde.html

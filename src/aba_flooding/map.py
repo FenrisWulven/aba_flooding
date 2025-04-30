@@ -14,6 +14,7 @@ from bokeh.models import GeoJSONDataSource, HoverTool, CheckboxGroup, CustomJS
 from bokeh.models import WMTSTileSource, Column, Slider
 from bokeh.transform import linear_cmap
 from bokeh.layouts import column
+from shapely.geometry import Polygon
 
 
 MODEL_PATH = "models/"
@@ -101,24 +102,51 @@ def init_map():
         sediment_data = load_terrain_data("Sediment_wgs84.geojson")
         print(f"Loaded sediment data with CRS: {sediment_data.crs}")
         
-        # Fix: Better CRS comparison and conversion
-        target_crs = "EPSG:3857"
+        sjaelland_polygon = Polygon([
+            (10.8, 54.9),   # Southwest corner
+            (10.8, 56.1),   # Northwest corner
+            (12.6, 56.1),   # Northeast corner
+            (12.6, 54.9),   # Southeast corner
+            (10.8, 54.9)    # Close the polygon
+        ])
+        
+        # Make sure sediment data has correct CRS before filtering
         if sediment_data.crs is None:
-            print("Warning: Sediment data has no CRS, assuming WGS84")
             sediment_data.crs = "EPSG:4326"
-            sediment_mercator = sediment_data.to_crs(target_crs)
-        elif str(sediment_data.crs).upper() != target_crs:
-            print(f"Converting sediment data from {sediment_data.crs} to {target_crs}")
-            # Fix any invalid geometries during conversion
+        elif str(sediment_data.crs).upper() != "EPSG:4326":
+            # Convert to WGS84 for filtering
+            filter_data = sediment_data.to_crs("EPSG:4326")
+        else:
+            filter_data = sediment_data
+           # Create GeoDataFrame for the filter polygon
+        filter_gdf = gpd.GeoDataFrame(geometry=[sjaelland_polygon], crs="EPSG:4326")
+        
+        # Spatial join to filter sediment data
+        initial_count = len(filter_data)
+        filter_data = gpd.sjoin(filter_data, filter_gdf, predicate='within')
+        print(f"Filtered from {initial_count} to {len(filter_data)} features (Sjælland only)")
+        
+        # If no features remain, it might mean polygon needs adjustment or different approach
+        if len(filter_data) == 0:
+            print("Warning: No features within Sjælland bounds, using intersects instead of within")
+            filter_data = gpd.sjoin(sediment_data.to_crs("EPSG:4326"), filter_gdf, predicate='intersects')
+            print(f"Intersects filtering resulted in {len(filter_data)} features")
+        
+        # Update sediment_data with filtered version
+        sediment_data = filter_data
+        
+        # Now proceed with CRS conversion for display
+        target_crs = "EPSG:3857"
+        if str(sediment_data.crs).upper() != target_crs:
+            print(f"Converting filtered sediment data from {sediment_data.crs} to {target_crs}")
             sediment_data = repair_geometries(sediment_data)
             sediment_mercator = sediment_data.to_crs(target_crs)
         else:
-            print("Sediment data already in Web Mercator projection")
             sediment_mercator = sediment_data
             
         has_sediment_data = True
     except Exception as e:
-        print(f"Could not load sediment data: {e}")
+        print(f"Could not load or filter sediment data: {e}")
         import traceback
         traceback.print_exc()
         has_sediment_data = False
@@ -213,14 +241,94 @@ def init_map():
         traceback.print_exc()
         
     # Add sediment layer if available
+    print("before sediment layer")
+    # sediment_layer = None
+    # if has_sediment_data:
+    #     sediment_geojson = gdf_to_geojson(sediment_mercator)
+    #     sediment_source = GeoJSONDataSource(geojson=sediment_geojson)
+    #     sediment_layer = p.patches('xs', 'ys', source=sediment_source,
+    #                             fill_color='brown', fill_alpha=0.4,
+    #                             line_color='black', line_width=0.2,
+    #                             legend_label="Sediment")
+
+    # Add sediment layer if available
     sediment_layer = None
     if has_sediment_data:
-        sediment_geojson = gdf_to_geojson(sediment_mercator)
-        sediment_source = GeoJSONDataSource(geojson=sediment_geojson)
-        sediment_layer = p.patches('xs', 'ys', source=sediment_source,
+        try:
+            print(f"Preparing sediment layer with {len(sediment_mercator)} features...")
+            
+            # First ensure all geometries are valid
+            sediment_mercator = repair_geometries(sediment_mercator)
+            
+            # Simplify complex geometries if needed
+            # if len(sediment_mercator) > 1000:
+            #     print("Large number of sediment features detected, simplifying...")
+            #     sediment_mercator = sediment_mercator.copy()
+            #     sediment_mercator.geometry = sediment_mercator.geometry.simplify(1.0)
+            
+            # Check for required fields for patches
+            if not all(col in sediment_mercator.columns for col in ['xs', 'ys']):
+                print("Converting geometries to xs/ys coordinates for Bokeh...")
+                
+                # Custom function to extract coordinates from geometries
+                def extract_polygon_coords(gdf):
+                    """Extract xs and ys coordinates from polygon geometries"""
+                    xs_list = []
+                    ys_list = []
+                    
+                    for geom in gdf.geometry:
+                        if geom.geom_type == 'Polygon':
+                            # Extract exterior coordinates
+                            xs, ys = geom.exterior.xy
+                            xs_list.append(list(xs))
+                            ys_list.append(list(ys))
+                        elif geom.geom_type == 'MultiPolygon':
+                            # For multipolygons, extract each polygon's coordinates
+                            multi_xs = []
+                            multi_ys = []
+                            for poly in geom.geoms:
+                                xs, ys = poly.exterior.xy
+                                multi_xs.append(list(xs))
+                                multi_ys.append(list(ys))
+                            xs_list.append(multi_xs)
+                            ys_list.append(multi_ys)
+                    
+                    gdf = gdf.copy()
+                    gdf['xs'] = xs_list
+                    gdf['ys'] = ys_list
+                    return gdf
+                
+                # Try explode to handle MultiPolygons
+                if 'MultiPolygon' in sediment_mercator.geometry.geom_type.values:
+                    print("Exploding MultiPolygons...")
+                    sediment_mercator = sediment_mercator.explode(index_parts=False)
+                    print(f"Exploded MultiPolygons, now have {len(sediment_mercator)} features")
+                
+                # Add xs and ys coordinates
+                sediment_mercator = extract_polygon_coords(sediment_mercator)
+                
+                # Convert to GeoJSON with safer method
+                sediment_geojson = gdf_to_geojson(sediment_mercator)
+                sediment_source = GeoJSONDataSource(geojson=sediment_geojson)
+            else:
+                # Direct method if xs/ys already exist
+                sediment_geojson = gdf_to_geojson(sediment_mercator)
+                sediment_source = GeoJSONDataSource(geojson=sediment_geojson)
+            
+            # Now create the layer with better error handling
+            sediment_layer = p.patches('xs', 'ys', source=sediment_source,
                                 fill_color='brown', fill_alpha=0.4,
                                 line_color='black', line_width=0.2,
                                 legend_label="Sediment")
+            
+            print("Successfully added sediment layer")
+        except Exception as e:
+            print(f"Failed to add sediment layer: {e}")
+            import traceback
+            traceback.print_exc()
+            has_sediment_data = False  # Mark as unavailable since we couldn't use it
+
+    print("after sediment layer")
     # Prepare FloodModel predictions
     flood_layer = None
     year_slider = Slider(start=0, end=10, value=0, step=1, title="Years into future")
@@ -236,6 +344,7 @@ def init_map():
                 # Plot models for available soil types
                 #flood_model.plot_all(save=True)
 
+            print("model?")
             # Precompute predictions for all years
             sediment_with_predictions = sediment_mercator.copy()
             for year in range(0, 2):
@@ -424,7 +533,6 @@ def init_map():
     p.legend.click_policy = "hide"
     p.legend.title = "Layers"
     
-    print("From the River to the Sea, Palestine will be Free!")
     return layout
 
 if __name__=="__main__":
