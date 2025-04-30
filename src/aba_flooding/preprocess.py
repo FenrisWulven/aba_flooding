@@ -1,6 +1,6 @@
 import pandas as pd
-import perculation_mapping as pm
-import geo_utils as gu
+import aba_flooding.perculation_mapping as pm
+import aba_flooding.geo_utils as gu
 # import perculation_mapping as pm
 # import geo_utils as gu
 from shapely.geometry import Point, Polygon
@@ -9,7 +9,10 @@ import numpy as np
 from shapely.geometry import Polygon
 import geopandas as gpd
 import os
-
+import matplotlib.pyplot as plt
+###########################################
+# SECTION 1: GEOGRAPHIC DATA PROCESSING   #
+###########################################
 
 def voronoi_finite_polygons_2d(vor, radius=None):
     """Convert Voronoi diagram to finite polygons."""
@@ -75,25 +78,24 @@ def voronoi_finite_polygons_2d(vor, radius=None):
     return new_regions, np.asarray(new_vertices)
 
 def create_precipitation_coverage(denmark_gdf):
-    """Create Voronoi polygons for precipitation stations that cover Denmark without overlap."""
+    """
+    Create Voronoi polygons for precipitation stations that cover Denmark without overlap.
+    
+    Called by: create_full_coverage()
+    Calls: voronoi_finite_polygons_2d()
+    """
     try:
-        # Load precipitation data - stations are rows with longitude and latitude columns
-        print("Loading precipitation data...")
+        # Load dmi station data - stations are rows with longitude and latitude columns
+        print(f"Loading dmi station data from data/raw/dmi_stations.parquet...")
         station_data = pd.read_parquet('data/raw/dmi_stations.parquet')
-        print(f"Loaded data with {len(station_data)} stations")
+        print(f"Loaded coordinate data of the station with {len(station_data)} stations")
         
         # Determine the station ID column
-        id_column = None
-        for possible_id in ['stationId']:
-            if possible_id in station_data.columns:
-                id_column = possible_id
-                break
-        
-        # If no obvious ID column is found, use the index
-        if id_column is None:
-            print("No obvious station ID column found, using index as station ID")
-            station_data['temp_id'] = station_data.index.astype(str)
-            id_column = 'temp_id'
+        if 'stationId' in station_data.columns:
+            id_column = 'stationId' 
+        else:
+            print("WARNING: No 'stationId' column found, using first column as ID")   
+            id_column = station_data.columns[0]  # Use the first column as ID 
         
         # Find longitude and latitude columns
         lon_col = next((col for col in station_data.columns if col.lower() in ['longitude', 'lon', 'long']), None)
@@ -101,24 +103,26 @@ def create_precipitation_coverage(denmark_gdf):
         
         if lon_col is None or lat_col is None:
             raise ValueError(f"Could not identify longitude and latitude columns. Available columns: {station_data.columns.tolist()}")
-        
         print(f"Using column '{lon_col}' for longitude, '{lat_col}' for latitude, and '{id_column}' for station IDs")
         
         # Create GeoDataFrame for stations
-        print("Creating station GeoDataFrame...")
+        print("Creating GeoDataFrame for stations containing their coordinates")
         stations_gdf = gpd.GeoDataFrame(
             station_data,
             geometry=gpd.points_from_xy(station_data[lon_col], station_data[lat_col]),
-            crs="EPSG:4326"  # WGS84
+            crs="EPSG:4326"  # WGS84 ellipsoid is a coordinate system used in Google Earth and GSP systems
         )
         
-        # Reproject to match map projection
-        print("Reprojecting to Web Mercator...")
+        # Reproject to match map projection since the Voronoi diagram is in EPSG:3857
+        print("Reprojecting to Web Mercator EPSG:3857 for Voronoi diagram calculations")
         stations_gdf = stations_gdf.to_crs("EPSG:3857")  # Web Mercator
+        # This EPSG:3857 makes the the X/Y coordinates in meters, which is suitable for Voronoi diagram calculations
+        # Basically it makes it square, so the Voronoi diagram is not distorted by the curvature of the earth
         
         # Print information about Denmark boundary
-        print(f"Denmark GDF info: {denmark_gdf.shape}")
-        print(f"Denmark CRS: {denmark_gdf.crs}")
+        # print(f"Denmark GDF info: {denmark_gdf.shape}")
+        # print(f"Denmark GDF columns: {denmark_gdf.columns.tolist()}")
+        # print(f"Denmark CRS: {denmark_gdf.crs}")
         
         # Create Voronoi diagram
         print("Creating Voronoi diagram...")
@@ -128,17 +132,20 @@ def create_precipitation_coverage(denmark_gdf):
         # Check for duplicate or very close points
         _, unique_indices = np.unique(np.round(coords, decimals=5), axis=0, return_index=True)
         if len(unique_indices) < len(coords):
-            print(f"Warning: Found {len(coords) - len(unique_indices)} potential duplicate points. Using only unique locations.")
+            print(f"WARNING: Found {len(coords) - len(unique_indices)} potential duplicate stations. Using only unique locations.")
             coords = coords[np.sort(unique_indices)]
             # Adjust stations_gdf to match unique points
             stations_gdf = stations_gdf.iloc[np.sort(unique_indices)].copy()
         
         # Get Denmark boundary for clipping
         boundary = denmark_gdf.geometry.union_all().bounds
-        print(f"Denmark bounds: {boundary}")
+        print(f"Denmark bounds:")
+        print(f"\tSW corner city: {boundary[0]}, {boundary[1]}")
+        print(f"\tNE corner city: {boundary[2]}, {boundary[3]}")
+
         boundary_width = boundary[2] - boundary[0]
         boundary_height = boundary[3] - boundary[1]
-        
+
         # Add corner points to ensure complete coverage
         corner_points = [
             [boundary[0] - boundary_width, boundary[1] - boundary_height],
@@ -154,7 +161,7 @@ def create_precipitation_coverage(denmark_gdf):
             vor = Voronoi(all_points)
             print(f"Voronoi diagram created with {len(vor.points)} points and {len(vor.vertices)} vertices")
         except Exception as vor_error:
-            print(f"Error creating Voronoi diagram: {vor_error}")
+            print(f"ERROR creating Voronoi diagram: {vor_error}")
             # Add jitter to points to avoid collinearity issues
             jitter = np.random.normal(0, 0.00001, all_points.shape)
             all_points = all_points + jitter
@@ -166,8 +173,9 @@ def create_precipitation_coverage(denmark_gdf):
         regions, vertices = voronoi_finite_polygons_2d(vor)
         print(f"Created {len(regions)} Voronoi regions")
         
-        # Create clipped polygons for each station
-        print("Creating clipped polygons...")
+        # Create clipped polygons for each station 
+        # this is because the Voronoi polygons can be infinite. So we need to clip them to the Denmark boundary
+        print("Creating clipped polygons so that they are within the Denmark boundary...")
         voronoi_polygons = []
         valid_station_ids = []
         
@@ -181,92 +189,69 @@ def create_precipitation_coverage(denmark_gdf):
                         voronoi_polygons.append(clipped_polygon)
                         valid_station_ids.append(stations_gdf.iloc[i][id_column])
                 except Exception as poly_error:
-                    print(f"Error creating polygon for region {i}: {poly_error}")
+                    print(f"ERROR creating polygon for region {i}: {poly_error}")
                     continue
         
         print(f"Created {len(voronoi_polygons)} valid polygons")
         
-        # Create GeoDataFrame with coverage areas
+        # Create GeoDataFrame with coverage areas, meaning that the polygons are the coverage areas of the stations
         coverage_gdf = gpd.GeoDataFrame(
             {'station_id': valid_station_ids},
             geometry=voronoi_polygons,
             crs=stations_gdf.crs
         )
         
-        # Add precipitation data to coverage areas if available
-        print("Adding station data to polygons...")
-        precipitation_column = next((col for col in station_data.columns if any(x in col.lower() for x in ['precip', 'rain', 'rainfall'])), None)
+        # TODO: Add avg_precipitation data to coverage areas if available
+        print("Adding avg preciptation to the station data of the polygons...")
+        # load in the precipitation data
+        precipitation_data = pd.read_parquet('data/raw/precipitation_imputed_data.parquet')
+        precipitation_data = precipitation_data.clip(lower=0, upper=100) 
+        # drop nans
+        # precipitation_data.dropna(inplace=True) # inplace means that 
+
+        # precipitation_data has columns indexed by station IDs with the mm values
+        avg_prec = precipitation_data.mean(axis=0, skipna=True)
+        print(f"Highest average precipitation: {avg_prec.max()}")
+        print(f"Lowest average precipitation: {avg_prec.min()}")
+
+        # check the avg_precipitation values as a histogram
+        plt.figure(figsize=(10, 6))
+        plt.title("Average Hourly Precipitation Histogram")
+        plt.xlabel("Average Hourly Precipitation (mm)")
+        plt.ylabel("Frequency")
+        plt.hist(avg_prec, bins=30, color='blue', alpha=0.7)
+        plt.grid(axis='y', alpha=0.75)
+        plt.tight_layout()
+        plt.savefig("outputs/plots/avg_precipitation_histogram.png")
         
-        if precipitation_column:
-            print(f"Found precipitation data in column: {precipitation_column}")
-            for i, station_id in enumerate(valid_station_ids):
-                try:
-                    # Find the row for this station in the original data
-                    station_row = station_data[station_data['stationId'] == station_id]
-                    if len(station_row) > 0:
-                        # Get precipitation value and convert to numeric
-                        precip_value = pd.to_numeric(station_row[precipitation_column].iloc[0], errors='coerce')
-                        if not pd.isna(precip_value):
-                            coverage_gdf.loc[i, 'avg_precipitation'] = precip_value
-                        else:
-                            print(f"Warning: Non-numeric precipitation value for station {station_id}. Using default.")
-                            coverage_gdf.loc[i, 'avg_precipitation'] = 0
-                except Exception as e:
-                    print(f"Error processing precipitation data for station {station_id}: {e}")
-        else:
-            print("No precipitation data column found. Using random values for visualization.")
-            # Generate random precipitation values for visualization
-            coverage_gdf['avg_precipitation'] = np.random.uniform(0, 100, size=len(coverage_gdf))
-        
-        print(f"Successfully created coverage areas for {len(coverage_gdf)} stations")
-        
-        # Save to file for inspection
-        
-        os.makedirs("data/processed", exist_ok=True)  # Create directory if it doesn't exist
-        os.makedirs("data/raw", exist_ok=True)  # Ensure raw directory exists too
-        
-        # Try different methods to save the GeoJSON file
-        try:
-            coverage_gdf.to_file("data/raw/precipitation_coverage.geojson", driver="GeoJSON")
-            print("Saved coverage GeoDataFrame to data/raw/precipitation_coverage.geojson")
-        except AttributeError as e:
-            if "module 'pyogrio' has no attribute 'write_dataframe'" in str(e):
-                print("Encountered pyogrio error, trying alternative method...")
-                try:
-                    # Try using fiona driver directly
-                    import fiona
-                    coverage_gdf.to_file(
-                        "data/raw/precipitation_coverage.geojson", 
-                        driver="GeoJSON",
-                        engine="fiona"
-                    )
-                    print("Saved coverage GeoDataFrame using fiona engine")
-                except Exception as fiona_error:
-                    print(f"Fiona method failed: {fiona_error}")
-                    try:
-                        # Last resort: manually create GeoJSON
-                        import json
-                        geojson_dict = json.loads(gu.gdf_to_geojson(coverage_gdf))
-                        with open("data/raw/precipitation_coverage.geojson", "w") as f:
-                            json.dump(geojson_dict, f)
-                        print("Saved coverage GeoDataFrame using manual JSON conversion")
-                    except Exception as json_error:
-                        print(f"Manual JSON conversion failed: {json_error}")
-                        print("WARNING: Could not save precipitation coverage file")
-            else:
-                print(f"Could not save coverage areas: {e}")
-        except Exception as general_error:
-            print(f"Could not save coverage areas: {general_error}")
-        
+        # Return the coverage GeoDataFrame and stations GeoDataFrame
+        # File saving is handled in create_full_coverage() to avoid duplication
         return coverage_gdf, stations_gdf
     
     except Exception as e:
-        print(f"Error creating precipitation coverage: {e}")
+        print(f"ERROR creating precipitation coverage: {e}")
         import traceback
         traceback.print_exc()
         return None, None
 
 def create_full_coverage():
+    """
+    Create coverage areas for precipitation stations across Denmark.
+    
+    Returns:
+    --------
+    tuple: (GeoJSONDataSource, GeoDataFrame, GeoDataFrame)
+        Coverage as GeoJSON source - contains geo data in GeoJSON format
+        coverage GeoDataFrame      - 
+        stations GeoDataFrame
+    
+    Called by: main
+    Calls: create_precipitation_coverage(), gu.gdf_to_geojson()
+    """
+    # Create directories for output files
+    os.makedirs("data/processed", exist_ok=True)
+    os.makedirs("data/raw", exist_ok=True)
+    
     # Create a simplified Denmark boundary manually
     print("Creating simplified Denmark boundary...")
     # Approximate Denmark bounding box in EPSG:4326 (WGS84)
@@ -276,12 +261,12 @@ def create_full_coverage():
         (8.0, 57.8),   # Northwest 
         (13.0, 57.8),  # Northeast 
         (13.0, 54.5),  # Southeast
-        (8.0, 54.5)    
+        (8.0, 54.5)    # to close the polygon
     ]
     
     # Create a polygon and convert to GeoDataFrame
     denmark_polygon = Polygon(denmark_coords)
-    denmark = gpd.GeoDataFrame(
+    denmark_polygon_gdf = gpd.GeoDataFrame(
         {'name': ['Denmark']}, 
         geometry=[denmark_polygon], 
         crs="EPSG:4326"
@@ -289,27 +274,19 @@ def create_full_coverage():
     print("Using simplified Denmark boundary")
 
     # Create station coverage areas
-    print("Creating station coverage areas")
-    coverage_geojson_gdf, stations_gdf = create_precipitation_coverage(denmark)
+    print("\nCreating station coverage areas")
+    coverage_geojson_gdf, stations_gdf = create_precipitation_coverage(denmark_polygon_gdf)
     
     if coverage_geojson_gdf is not None and not coverage_geojson_gdf.empty:
-        print(f"Successfully created coverage GeoDataFrame with {len(coverage_geojson_gdf)} polygons")
-        # Create GeoJSON data source for precipitation coverage
-        coverage_geojson = gu.gdf_to_geojson(coverage_geojson_gdf)
-        coverage_geojson = gu.GeoJSONDataSource(geojson=coverage_geojson)
-
-        print("Created GeoJSON data source for precipitation coverage")
-        # Save the GeoJSON data source
-        os.makedirs("data/processed", exist_ok=True)  # Create directory if it doesn't exist
-        os.makedirs("data/raw", exist_ok=True)  # Ensure raw directory exists too
+        print(f"Successfully created polygon coverage GeoDataFrame with {len(coverage_geojson_gdf)} polygons")
         
-        # Try different methods to save the GeoJSON file
+        # Save the GeoJSON file using various methods as fallbacks
         try:
             coverage_geojson_gdf.to_file("data/raw/precipitation_coverage.geojson", driver="GeoJSON")
             print("Saved coverage GeoDataFrame to data/raw/precipitation_coverage.geojson")
         except AttributeError as e:
             if "module 'pyogrio' has no attribute 'write_dataframe'" in str(e):
-                print("Encountered pyogrio error, trying alternative method...")
+                print("ERROR saving 'precipitation_coverage.geojson' due to pyogrio error has no attribute 'write_dataframe'") 
                 try:
                     # Try using fiona driver directly
                     import fiona
@@ -320,7 +297,7 @@ def create_full_coverage():
                     )
                     print("Saved coverage GeoDataFrame using fiona engine")
                 except Exception as fiona_error:
-                    print(f"Fiona method failed: {fiona_error}")
+                    print(f"ERROR Fiona method failed also: {fiona_error}")
                     try:
                         # Last resort: manually create GeoJSON
                         import json
@@ -329,34 +306,41 @@ def create_full_coverage():
                             json.dump(geojson_dict, f)
                         print("Saved coverage GeoDataFrame using manual JSON conversion")
                     except Exception as json_error:
-                        print(f"Manual JSON conversion failed: {json_error}")
-                        print("WARNING: Could not save precipitation coverage file")
+                        print(f"ERROR Manual JSON conversion failed: {json_error}")
+                        print("ERROR: Could not save precipitation coverage file")
             else:
-                print(f"Could not save coverage areas: {e}")
+                print(f"ERROR Could not save precipitation coverage areas: {e}")
         except Exception as general_error:
-            print(f"Could not save coverage areas: {general_error}")
+            print(f"ERROR Could not save precipitation coverage areas: {general_error}")
+        
+        return coverage_geojson_gdf, stations_gdf
+    
     else:
         print("No valid coverage areas created. Skipping GeoJSON creation.")
         return None, None, None
-    
-    
-    return coverage_geojson,coverage_geojson_gdf, stations_gdf
+
+###########################################
+# SECTION 2: SOIL AND SEDIMENT ANALYSIS   #
+###########################################
 
 def sediment_types_for_station(stationId, precipitationCoverageStations, sedimentCoverage):
     """
     Get all soil types contained within a station area.
     
     Parameters:
-    -----------
+    -----------    
     stationId : str
         Station ID to filter soil types
     precipitationCoverageStations : geoDataFrame
         GeoDataFrame containing precipitation coverage data
     sedimentCoverage : geoDataFrame
         GeoDataFrame containing sediment coverage data
+    
     Returns:
     --------
     list : List of soil types within the station area or empty list if station not found
+    
+    Called by: load_process_data()
     """
     # Debug information about the datasets
     print(f"Precipitation coverage CRS: {precipitationCoverageStations.crs}")
@@ -367,7 +351,7 @@ def sediment_types_for_station(stationId, precipitationCoverageStations, sedimen
     if 'stationId' in precipitationCoverageStations.columns:
         id_column = 'stationId'
     
-    print(f"Using {id_column} to identify stations. Available values: {precipitationCoverageStations[id_column].head().tolist()}")
+    print(f"Using {id_column} to identify stations.")
     
     # Get the stations matching the stationId
     matching_stations = precipitationCoverageStations[precipitationCoverageStations[id_column] == stationId]
@@ -453,7 +437,7 @@ def gather_soil_types(purculation_mapping):
     Create a dictionary of soil types with their average percolation rates.
     
     Parameters:
-    -----------
+    -----------    
     purculation_mapping : dict
         Dictionary with soil types as keys and min/max percolation rates
         
@@ -461,6 +445,8 @@ def gather_soil_types(purculation_mapping):
     --------
     dict
         Dictionary with soil types as keys and average percolation rates as values
+    
+    Called by: load_process_data()
     """
     # Take perculation Keys and the min and max / 2 and add to a dict
     soil_types = {}
@@ -471,12 +457,16 @@ def gather_soil_types(purculation_mapping):
         soil_types[key] = (min + max) / 2
     return soil_types
 
+###########################################
+# SECTION 3: WATER CALCULATIONS           #
+###########################################
+
 def calculate_water_on_ground(df, soil_types, absorbtions, station):
     """
     Calculate water on ground for specific soil types and station.
 
     Parameters:
-    -----------
+    -----------    
     df : pandas.DataFrame
         Dataframe containing precipitation data with a 'Nedbor' column
     soil_types : list
@@ -485,10 +475,12 @@ def calculate_water_on_ground(df, soil_types, absorbtions, station):
         Dictionary with soil types and their absorption rates
     station : str
         Station ID to use in column naming
-        
+    
     Returns:
     --------
     pandas.DataFrame: Dataframe with water on ground values for the specified soil types
+    
+    Called by: load_process_data()
     """
     # Get precipitation values as numpy array for faster calculations
     precip_array = df['Nedbor'].values
@@ -576,46 +568,116 @@ def calculate_water_on_ground(df, soil_types, absorbtions, station):
     result_df = pd.concat([df, new_df], axis=1)
     
     return result_df
-def load_process_data():
+
+###########################################
+# SECTION 4: DATA LOADING AND SAVING      #
+###########################################
+
+def load_process_data(coverage_data=None, sediment_data=None):
     """
     Load precipitation data and calculate water-on-ground values for different soil types.
+    
+    Parameters:
+    -----------
+    coverage_data : GeoDataFrame, optional
+        Pre-loaded precipitation coverage data
+    sediment_data : GeoDataFrame, optional
+        Pre-loaded sediment coverage data
     
     Returns:
     --------
     pandas.DataFrame: Processed data with soil type observations and durations
+    
+    Called by: main
+    Calls: gather_soil_types(), sediment_types_for_station(), calculate_water_on_ground(), save_preprocessed_data()
     """
     try:
         # Load the data
-        print("Loading precipitation data...")
+        print("\nLoading precipitation imputed data...")
         df = pd.read_parquet("data/raw/precipitation_imputed_data.parquet")
-        print(f"Loaded precipitation data with columns: {df.columns.tolist()[:5]}...")
-        df = df.clip(lower=0, upper=60)
+        # print(f"Loaded precipitation data with columns: {df.columns.tolist()[:]}...")
+        print(f"This is a total number of columns: {len(df.columns)}, which is the number of stations")
+        # each row is an hour of precipitation data for each station
+        # save as csv for easier debugging
+        df.to_csv("data/raw/precipitation_imputed_data.csv", index=False)
+        print(f"Precipitation data shape: {df.shape}") #(262783, 86)
 
-        print("Loading precipitation coverage stations...")
-        precipitationCoverageStations = gpd.read_file("data/raw/precipitation_coverage.geojson")
-        print(f"Loaded precipitation coverage with {len(precipitationCoverageStations)} stations")
+        # total number of nans across all columns (all stations)
+        print(f"Total number of NaNs in the data: {df.isna().sum().sum()}")
+
+        # look column-wise for the number of nans
+        stations_with_most_nans = df.isna().sum().sort_values(ascending=False)
+        print(f"Top 5 Stations with the most NaNs in procent of that station: {(stations_with_most_nans / len(df) * 100).head(5)}")
+        # here we can divide by len(df) because all columns have the same length
+
+        # before clipping to remove extreme values, we need to check the data
+        # Check for extreme values in the data
+        # print(f"Precipitation data summary:\n{df.describe()}")
+
+        # def length before clipping - which just replaces values lower than 0 with 0 and values higher than 60 with 60
+        # clip does not replace Nans, only limits existing values 
+        df = df.clip(lower=0, upper=100) 
+        # check min and max values
+
+
+        #https://international.kk.dk/sites/default/files/2021-09/Cloudburst%20Management%20plan%202010.pdf?utm_source=chatgpt.com
+        # precipitation measured close to 100 mm in one hour.
+
+        #https://web.archive.org/web/20140913151609/http://vejret.tv2.dk/artikel/id-32909558:et-af-de-kraftigste-regnvejr-nogensinde.html
+        # over 100mm in 24 hours and private measurements for 160mm in 124 hours
+
+        #https://ui.adsabs.harvard.edu/abs/2021AGUFMGC45G0892C/abstract
+        #Between 90 and 135 mm of precipitation in less than 2 hours was recorded
+
+        #https://vejr.tv2.dk/2019-12-28-her-er-de-danske-vejrrekorder-fra-de-seneste-10-aar
+        # Here the record is 63mm in 30mins
+
+        #https://vejr.tv2.dk/2016-07-02-husker-du-vejret-den-2-juli-2011-historisk-skybrud-ramte-koebenhavn
+        # Kraftig regn er, når der falder mere end 24 millimeter regn over en periode på maksimalt seks timer.
+        # Skybrud er, når der falder mere end 15 millimeter regn over en periode på maksimalt 30 minutter.
+        # def length after clipping
+
+        # Use provided coverage data or load from file
+        if coverage_data is not None:
+            precipitationCoverageStations = coverage_data
+            print(f"Using provided precipitation coverage with {len(precipitationCoverageStations)} stations")
+        else:
+            print("Loading precipitation coverage stations...")
+            precipitationCoverageStations = gu.load_geojson("precipitation_coverage.geojson")
+            print(f"Loaded precipitation coverage with {len(precipitationCoverageStations)} stations")
         
-        print("Loading sediment coverage...")
-        sedimentCoverage = gpd.read_file("data/raw/Sediment_wgs84.geojson")
-        print(f"Loaded sediment coverage with {len(sedimentCoverage)} features")
+        # Use provided sediment data or load from file
+        if sediment_data is not None:
+            sedimentCoverage = sediment_data
+            print(f"Using provided sediment coverage with {len(sedimentCoverage)} features")
+        else:
+            print("\nLoading sediment coverage...")
+            sedimentCoverage = gu.load_geojson("Sediment_wgs84.geojson")
+            print(f"Loaded sediment coverage with {len(sedimentCoverage)} features")
 
         # Get absorption rates for each soil type
         absorbtions = gather_soil_types(pm.percolation_rates_updated)
         print(f"Gathered absorption rates for {len(absorbtions)} soil types")
         
-        # Process only a subset of stations for debugging if needed
-        #stations_to_process = df.columns[:2]  # Uncomment to process only first 2 stations
+        print(f"\nPrecipitaion dataset columns: {df.columns.tolist()}")
         stations_to_process = df.columns
 
-        
         # For each station in the data, calculate the water on ground for each soil type
         for station in stations_to_process:
             print(f"Processing station {station}...")
-            df_station = df[[station]].copy()
-            # Rename the column to 'Nedbor' (precipitation) for consistency
+            df_station = df[[station]].copy() # this is a single column dataframe with the precipitation data for this station
+            
+            # Rename the station name column to 'Nedbor' (precipitation) for consistency
             df_station.rename(columns={station: 'Nedbor'}, inplace=True)
 
-            df_station.dropna(inplace=True)
+            # length before dropping NaN values
+            pre_drop_nans = len(df_station)
+            print(f"  • Precipitation data {station} length before dropping NaN: {len(df_station)}")
+            df_station.dropna(inplace=True) 
+            # we remove the rows with NaN values, because they are not useful for our calculations 
+            # as we want to calculate the water on ground only for the rows with precipitation data
+            print(f"  • Removed {pre_drop_nans - len(df_station)} NaN values (procent {(pre_drop_nans - len(df_station)) / pre_drop_nans * 100:.2f}%)")
+            
             if df_station.empty:
                 print(f"No data for station {station}, skipping...")
                 continue
@@ -638,14 +700,14 @@ def load_process_data():
                     save_preprocessed_data(result_columns, f"data/processed/survival_data_{station}.csv")
                     print(f"Saved processed data for station {station}")
             except Exception as e:
-                print(f"Error processing station {station}: {e}")
+                print(f"ERROR processing station {station}: {e}")
                 continue
         
         # Combine all result DataFrames at once
         return None  # Return None to indicate completion
         
     except Exception as e:
-        print(f"Error in load_process_data: {e}")
+        print(f"ERROR in load_process_data: {e}")
         import traceback
         traceback.print_exc()
         return pd.DataFrame()  # Return empty DataFrame on error
@@ -655,11 +717,13 @@ def save_preprocessed_data(survival_df, output_path="data/processed/survival_dat
     Save the processed survival data to a CSV file.
     
     Parameters:
-    -----------
+    -----------    
     survival_df : DataFrame
         DataFrame containing survival data for different soil types and stations
     output_path : str
         Path to save the combined CSV file
+    
+    Called by: load_process_data()
     """
     import os
     
@@ -670,9 +734,15 @@ def save_preprocessed_data(survival_df, output_path="data/processed/survival_dat
         survival_df.to_parquet(output_path.replace('.csv', '.parquet'), index=False)
         print(f"Saved preprocessed survival data to {output_path.replace('.csv', '.parquet')}")
     except Exception as e:
-        print(f"Error saving to Parquet: {e}")
-        survival_df.to_csv(output_path, index=False)
-    print(f"Saved preprocessed survival data to {output_path}")
+        print(f"ERROR saving to Parquet: {e}")
+        print("Falling back to CSV format")
+        try:
+            survival_df.to_csv(output_path, index=False)
+            print(f"Saved preprocessed survival data to {output_path}")
+        except Exception as e:
+            print(f"ERROR saving to CSV: {e}")
+            print("Failed to save preprocessed data")
+            return None
     
     return survival_df
 
@@ -681,14 +751,16 @@ def load_saved_data(file_path="data/processed/survival_data.csv"):
     Load previously saved preprocessed data.
     
     Parameters:
-    -----------
+    -----------    
     file_path : str
         Path to the saved data file
-        
+    
     Returns:
     --------
     dict
         Dictionary with soil types as keys and survival dataframes as values
+    
+    Called by: main
     """
 
     import os
@@ -700,7 +772,7 @@ def load_saved_data(file_path="data/processed/survival_data.csv"):
             print(f"Loaded preprocessed data from {file_path.replace('.csv', '.parquet')}")
             return survival_df
     except Exception as e:
-        print(f"Error loading Parquet data: {e}")
+        print(f"ERROR loading Parquet data: {e}")
 
     try:
         # Load the combined dataframe
@@ -709,25 +781,49 @@ def load_saved_data(file_path="data/processed/survival_data.csv"):
         return survival_df
         
     except Exception as e:
-        print(f"Error loading data from {file_path}: {e}")
+        print(f"ERROR loading data from {file_path}: {e}")
         return None
 
+###########################################
+# MAIN EXECUTION                          #
+###########################################
+
 if __name__ == "__main__":
-    # Coverage
-    coverage_geojson, coverage_geojson_gdf, stations_gdf = create_full_coverage()
-    if coverage_geojson is None:
-        print("No valid coverage data created. Exiting.")
-        exit(1)
+
+    # TODO uncomment this
+    # Step 1: Create coverage areas for precipitation stations
+    coverage_geojson_gdf, stations_gdf = create_full_coverage()
+    # this functions saves the coverage_geojson_gdf to a file called precipitation_coverage.geojson
+    if coverage_geojson_gdf is None:
+        print("ERROR No valid coverage data created. Attemption to load from file.")
+        try:
+            coverage_geojson_gdf = gu.load_geojson("precipitation_coverage.geojson")
+            print("Loaded coverage data from file.")
+        except Exception as e:
+            print(f"ERROR loading coverage data from file: {e}")
+            print("Exiting.")
+            exit(1)
     
-    # Load sediment
+    # Step 2: Load sediment data - this was the layer that was exported from the QGIS project
+    print("Loading Sediment_wgs84.geojson...")
     sedimentCoverage = gu.load_geojson("Sediment_wgs84.geojson")
     if sedimentCoverage is None:
         print("No valid sediment data loaded. Exiting.")
         exit(1)
     
-    # Load and process data
-    load_process_data()
-    
-    df = load_saved_data('data/processed/survival_data_06058.csv')
+    # Step 3: Process precipitation and soil data
+    # - this gathers the soil types
+    # For each station, it calculates
+    # * sediment types for the given station
+    # * water on ground for each soil type
+    # * saves the processed data to a CSV file
+    load_process_data(coverage_data=coverage_geojson_gdf, sediment_data=sedimentCoverage)
 
-    print(df.head())
+    # Step 4: TESTING - Load and display sample processed data for a specific station
+    station_id = '06058'  # Example station ID
+    df = load_saved_data(f'data/processed/survival_data_{station_id}.csv')
+    if df is not None:
+        print(f"\nSample data for station {station_id}:")
+        print(df.head())
+    else:
+        print(f"No data found for station {station_id}")
