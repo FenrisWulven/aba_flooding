@@ -118,6 +118,9 @@ def init_map():
             (10.8, 54.9)    # Close the polygon
         ])
         
+        print(f"Sediment data size before simplification: {len(sediment_data)} polygons")
+        
+        # Fix: Better CRS comparison and conversion
         target_crs = "EPSG:3857"
         # Make sure sediment data has correct CRS before filtering
         if sediment_data.crs is None:
