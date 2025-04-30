@@ -1,9 +1,10 @@
 import os
-from model import FloodModel
 import matplotlib.pyplot as plt
 import numpy as np
 
-from train import process_station_file
+from aba_flooding.train import process_station_file
+from aba_flooding.model import FloodModel
+
 
 def inspect_model(train = False):
     """Inspect the trained flood model."""
@@ -78,7 +79,7 @@ def inspect_station(model, station_id):
     
     # For debugging, let's examine the model structure
     print(f"Available model attributes: {[attr for attr in dir(model) if not attr.startswith('_')]}")
-    
+
     # Try using the get_station_models method if available
     if hasattr(model, 'get_station_models'):
         print(f"Using get_station_models to load models for station {station_id}...")
@@ -135,6 +136,7 @@ def inspect_station(model, station_id):
                                 else:
                                     t_years = t_value
                                 
+
                                 surv_prob = survival_model.predict_proba(t_years)
                                 # Flood probability is 1-survival probability
                                 flood_prob = (1-surv_prob)*100 if isinstance(surv_prob, (int, float)) else None
@@ -186,7 +188,7 @@ def plot_survival_curves(station_models, station_id):
     Plot survival curves for models of a specific station
     
     Parameters:
-    -----------
+    -----------    
     station_models : dict
         Dictionary of soil type -> survival model
     station_id : str
@@ -199,7 +201,7 @@ def plot_survival_curves(station_models, station_id):
         return
     
     # Create output directory if it doesn't exist
-    plot_dir = os.path.join("outputs", "plots")
+    plot_dir = os.path.join("outputs", "plots", "inspect_model")
     os.makedirs(plot_dir, exist_ok=True)
     
     # Different time scales to plot
@@ -276,6 +278,18 @@ if __name__ == "__main__":
 
     df['06136_HG_observed'] = df['06136_HG_observed'].astype(bool)
 
+    time, survival_prob, conf_int = kaplan_meier_estimator(df['05109_HI_observed'], df['05109_HI_duration'], conf_type="log-log")
+
+    # Ensure the directory exists before saving the plot
+    output_dir = os.path.join('outputs', 'plots', 'inspect_model')
+    os.makedirs(output_dir, exist_ok=True)
+
+    plt.step(time, survival_prob, where="post")
+    plt.fill_between(time, conf_int[0], conf_int[1], alpha=0.25, step="post")
+    plt.ylim(0, 1)
+    plt.ylabel(r"est. probability of survival $\hat{S}(t)$")
+    plt.xlabel("time $t$")
+    plt.savefig(os.path.join(output_dir, "km_plot.png"))
 
     print(df['06136_HG_observed'].value_counts())
     print(df['06136_HG_duration'].describe())
@@ -287,6 +301,14 @@ if __name__ == "__main__":
     else:
         print("No events found! All observations are censored.")
 
+
+    # Try plotting the cumulative hazard (might show the pattern better)
+    plt.figure(figsize=(10, 6))
+    km.plot_cumulative_density()
+    plt.grid(True)
+    plt.title("Cumulative density")
+    plt.savefig('outputs/plots/inspect_model/cumulative_density.png')
+
     # Check for issues in the duration data
     plt.figure(figsize=(10, 6))
     plt.hist(df['06136_HG_duration'], bins=50) 
@@ -296,6 +318,11 @@ if __name__ == "__main__":
     plt.figure()
     plt.plot(df['06136_WOG_HG'])
     plt.savefig("ss21.png")
+    plt.savefig('outputs/plots/inspect_model/duration_hist.png')
+
+    plt.figure()
+    plt.plot(df['05109_WOG_HI'])
+    plt.savefig("outputs/plots/inspect_model/ss21.png")
 
     plt.figure()
 
@@ -320,7 +347,7 @@ if __name__ == "__main__":
     km_tte.plot_cumulative_density()
     plt.grid(True)
     plt.title("Cumulative Incidence (using TTE values)")
-    plt.savefig('cumulative_density_tte.png')
+    plt.savefig('outputs/plots/inspect_model/cumulative_density_tte.png')
 
     # SOLUTION 2: Try duration with events correctly marked
     plt.figure(figsize=(10, 6))
@@ -329,7 +356,7 @@ if __name__ == "__main__":
     km_dur.plot_cumulative_density()
     plt.grid(True)
     plt.title("Cumulative Incidence (using duration values)")
-    plt.savefig('cumulative_density_duration.png')
+    plt.savefig('outputs/plots/inspect_model/cumulative_density_duration.png')
 
 
     # SOLUTION 4: Check for time window issues
@@ -337,7 +364,7 @@ if __name__ == "__main__":
     plt.figure(figsize=(10, 6))
     plt.plot(evenHI_by_time)
     plt.title("Event Rate Over Time (Moving Average)")
-    plt.savefig('event_rate_time.png')
+    plt.savefig('outputs/plots/inspect_model/event_rate_time.png')
 
     # Create sksurv-compatible structured array
     y = np.zeros(len(df), dtype=[('event', bool), ('time', float)])
@@ -357,7 +384,7 @@ if __name__ == "__main__":
     test.plot_cumulative_density()
     plt.grid(True)
     plt.title("Cumulative Incidence (Weibull)")
-    plt.savefig('cumulative_density_weibull.png')
+    plt.savefig(os.path.join('outputs', 'plots', 'inspect_model', 'cumulative_density_weibull.png'))
     print(f"Weibull parameters: {test.lambda_}, {test.rho_}")
     print(f"Weibull median survival time: {test.median_survival_time_}")
     print(f"Weibull AIC: {test.AIC_}")
@@ -369,7 +396,7 @@ if __name__ == "__main__":
     test.plot_cumulative_density()
     plt.grid(True)
     plt.title("Cumulative Incidence (Exponential)")
-    plt.savefig('cumulative_density_exponential.png')
+    plt.savefig(os.path.join('outputs', 'plots', 'inspect_model', 'cumulative_density_exponential.png'))
     print(f"Exponential parameters: {test.lambda_}")
     print(f"Exponential median survival time: {test.median_survival_time_}")
     print(f"Exponential AIC: {test.AIC_}")
@@ -381,7 +408,7 @@ if __name__ == "__main__":
     test.plot_cumulative_density()
     plt.grid(True)
     plt.title("Cumulative Incidence (LogNormal)")
-    plt.savefig('cumulative_density_lognormal.png')
+    plt.savefig(os.path.join('outputs', 'plots', 'inspect_model', 'cumulative_density_lognormal.png'))
     print(f"LogNormal parameters: {test.mu_}, {test.sigma_}")
     print(f"LogNormal median survival time: {test.median_survival_time_}")
     print(f"LogNormal AIC: {test.AIC_}")

@@ -1,6 +1,8 @@
 import bokeh
 import os
 import geopandas as gpd
+import time
+import json  # Add for debugging GeoJSON structure
 
 from aba_flooding.geo_utils import load_terrain_data, gdf_to_geojson, wgs84_to_web_mercator, load_geojson, load_gpkg, load_terrain_data, gdf_to_geojson
 from aba_flooding.model import FloodModel
@@ -49,7 +51,7 @@ def load_models(model_path):
                 for station in model.stations:
                     # Try both naming patterns
                     station_files = [
-                        os.path.join(stations_dir, f"{station}.joblib"),   # Original pattern
+                        # os.path.join(stations_dir, f"{station}.joblib"),   # Original pattern
                         os.path.join(stations_dir, f"station_{station}.joblib")  # Pattern from train.py
                     ]
                     
@@ -65,7 +67,7 @@ def load_models(model_path):
                             station_models = model.load_station(station, os.path.dirname(station_file))
                             loaded_count += len(station_models) if station_models else 0
                         except Exception as e:
-                            print(f"Error loading station {station}: {e}")
+                            print(f"ERROR loading station {station}: {e}")
                     else:
                         print(f"No file found for station {station}, tried patterns: {station_files}")
                 
@@ -76,10 +78,11 @@ def load_models(model_path):
         print(f"Model loaded successfully with {len(model.models)} models across {len(model.stations)} stations")
         return model
     except Exception as e:
-        print(f"Error loading model: {e}")
+        print(f"ERROR loading model: {e}")
         import traceback
         traceback.print_exc()
-        return None
+        exit(1)
+        # return None
 
 def repair_geometries(gdf):
     """Repair invalid geometries in a GeoDataFrame"""
@@ -99,8 +102,13 @@ def init_map():
     # Load sediment data
     print("Loading sediment data...")
     try:
+        # Uncomment the line below to use full Denmark dataset
         sediment_data = load_terrain_data("Sediment_wgs84.geojson")
+        # Comment out the line below when using full dataset
+        # sediment_data = load_terrain_data("Sediment.geojson")
+
         print(f"Loaded sediment data with CRS: {sediment_data.crs}")
+        print(f"Sediment data size before simplification: {len(sediment_data)} polygons")
         
         sjaelland_polygon = Polygon([
             (10.8, 54.9),   # Southwest corner
@@ -113,36 +121,31 @@ def init_map():
         # Make sure sediment data has correct CRS before filtering
         if sediment_data.crs is None:
             sediment_data.crs = "EPSG:4326"
-        elif str(sediment_data.crs).upper() != "EPSG:4326":
-            # Convert to WGS84 for filtering
-            filter_data = sediment_data.to_crs("EPSG:4326")
-        else:
-            filter_data = sediment_data
-           # Create GeoDataFrame for the filter polygon
-        filter_gdf = gpd.GeoDataFrame(geometry=[sjaelland_polygon], crs="EPSG:4326")
-        
-        # Spatial join to filter sediment data
-        initial_count = len(filter_data)
-        filter_data = gpd.sjoin(filter_data, filter_gdf, predicate='within')
-        print(f"Filtered from {initial_count} to {len(filter_data)} features (Sjælland only)")
-        
-        # If no features remain, it might mean polygon needs adjustment or different approach
-        if len(filter_data) == 0:
-            print("Warning: No features within Sjælland bounds, using intersects instead of within")
-            filter_data = gpd.sjoin(sediment_data.to_crs("EPSG:4326"), filter_gdf, predicate='intersects')
-            print(f"Intersects filtering resulted in {len(filter_data)} features")
-        
-        # Update sediment_data with filtered version
-        sediment_data = filter_data
-        
-        # Now proceed with CRS conversion for display
-        target_crs = "EPSG:3857"
-        if str(sediment_data.crs).upper() != target_crs:
-            print(f"Converting filtered sediment data from {sediment_data.crs} to {target_crs}")
             sediment_data = repair_geometries(sediment_data)
+            # Simplify geometries before conversion to reduce payload size
+            print("Simplifying geometries...")
+            sediment_data = sediment_data.copy()
+            sediment_data.geometry = sediment_data.geometry.simplify(tolerance=50)
+            sediment_mercator = sediment_data.to_crs(target_crs)
+        elif str(sediment_data.crs).upper() != target_crs:
+            print(f"Converting sediment data from {sediment_data.crs} to {target_crs} Web Mercator")
+            # Fix any invalid geometries during conversion
+            sediment_data = repair_geometries(sediment_data)
+            # Simplify geometries before conversion to reduce payload size
+            print("Simplifying geometries...")
+            sediment_data = sediment_data.copy()
+            sediment_data.geometry = sediment_data.geometry.simplify(tolerance=50)
             sediment_mercator = sediment_data.to_crs(target_crs)
         else:
+            print("Sediment data already in Web Mercator projection")
+            # Still simplify geometries for better performance
+            print("Simplifying geometries...")
+            sediment_data = sediment_data.copy()
+            sediment_data.geometry = sediment_data.geometry.simplify(tolerance=50)
             sediment_mercator = sediment_data
+        
+        print(f"Sediment data size after simplification: {len(sediment_mercator)} polygons")
+        print(f"Sediment data bounds: {sediment_mercator.total_bounds}")
             
         has_sediment_data = True
     except Exception as e:
@@ -150,8 +153,7 @@ def init_map():
         import traceback
         traceback.print_exc()
         has_sediment_data = False
-        return None
-    
+        exit(1)
     
     # Prepare map figure
     denmark_bounds_x = (670000, 1500000)
@@ -255,80 +257,36 @@ def init_map():
     sediment_layer = None
     if has_sediment_data:
         try:
-            print(f"Preparing sediment layer with {len(sediment_mercator)} features...")
+            print("Converting sediment data to GeoJSON...")
+            sediment_geojson = gdf_to_geojson(sediment_mercator)
             
-            # First ensure all geometries are valid
-            sediment_mercator = repair_geometries(sediment_mercator)
+            # Debug: Check the size of the GeoJSON payload
+            geojson_size_mb = len(sediment_geojson) / (1024 * 1024)
+            print(f"GeoJSON payload size: {geojson_size_mb:.2f} MB")
             
-            # Simplify complex geometries if needed
-            # if len(sediment_mercator) > 1000:
-            #     print("Large number of sediment features detected, simplifying...")
-            #     sediment_mercator = sediment_mercator.copy()
-            #     sediment_mercator.geometry = sediment_mercator.geometry.simplify(1.0)
+            if geojson_size_mb > 50:  # If payload is very large, consider URL option
+                print("Warning: GeoJSON payload is very large. Consider using file-based GeoJSON.")
+                # Option to save and load via URL instead of inlining
+                # os.makedirs("data", exist_ok=True)
+                # with open("data/sediment.geojson", "w") as f:
+                #     f.write(sediment_geojson)
+                # sediment_source = GeoJSONDataSource(url="data/sediment.geojson")
             
-            # Check for required fields for patches
-            if not all(col in sediment_mercator.columns for col in ['xs', 'ys']):
-                print("Converting geometries to xs/ys coordinates for Bokeh...")
-                
-                # Custom function to extract coordinates from geometries
-                def extract_polygon_coords(gdf):
-                    """Extract xs and ys coordinates from polygon geometries"""
-                    xs_list = []
-                    ys_list = []
-                    
-                    for geom in gdf.geometry:
-                        if geom.geom_type == 'Polygon':
-                            # Extract exterior coordinates
-                            xs, ys = geom.exterior.xy
-                            xs_list.append(list(xs))
-                            ys_list.append(list(ys))
-                        elif geom.geom_type == 'MultiPolygon':
-                            # For multipolygons, extract each polygon's coordinates
-                            multi_xs = []
-                            multi_ys = []
-                            for poly in geom.geoms:
-                                xs, ys = poly.exterior.xy
-                                multi_xs.append(list(xs))
-                                multi_ys.append(list(ys))
-                            xs_list.append(multi_xs)
-                            ys_list.append(multi_ys)
-                    
-                    gdf = gdf.copy()
-                    gdf['xs'] = xs_list
-                    gdf['ys'] = ys_list
-                    return gdf
-                
-                # Try explode to handle MultiPolygons
-                if 'MultiPolygon' in sediment_mercator.geometry.geom_type.values:
-                    print("Exploding MultiPolygons...")
-                    sediment_mercator = sediment_mercator.explode(index_parts=False)
-                    print(f"Exploded MultiPolygons, now have {len(sediment_mercator)} features")
-                
-                # Add xs and ys coordinates
-                sediment_mercator = extract_polygon_coords(sediment_mercator)
-                
-                # Convert to GeoJSON with safer method
-                sediment_geojson = gdf_to_geojson(sediment_mercator)
-                sediment_source = GeoJSONDataSource(geojson=sediment_geojson)
-            else:
-                # Direct method if xs/ys already exist
-                sediment_geojson = gdf_to_geojson(sediment_mercator)
-                sediment_source = GeoJSONDataSource(geojson=sediment_geojson)
+            # Debug: Check if GeoJSON has the expected fields
+            sample_feature = json.loads(sediment_geojson)["features"][0] if "features" in json.loads(sediment_geojson) else None
+            if sample_feature:
+                print(f"GeoJSON feature properties: {list(sample_feature['properties'].keys())}")
             
-            # Now create the layer with better error handling
+            sediment_source = GeoJSONDataSource(geojson=sediment_geojson)
             sediment_layer = p.patches('xs', 'ys', source=sediment_source,
-                                fill_color='brown', fill_alpha=0.4,
-                                line_color='black', line_width=0.2,
-                                legend_label="Sediment")
-            
-            print("Successfully added sediment layer")
+                                    fill_color='brown', fill_alpha=0.4,
+                                    line_color='black', line_width=0.2,
+                                    legend_label="Sediment")
         except Exception as e:
-            print(f"Failed to add sediment layer: {e}")
+            print(f"ERROR creating sediment layer: {e}")
             import traceback
             traceback.print_exc()
-            has_sediment_data = False  # Mark as unavailable since we couldn't use it
-
-    print("after sediment layer")
+    
     # Prepare FloodModel predictions
     flood_layer = None
     year_slider = Slider(start=0, end=10, value=0, step=1, title="Years into future")
@@ -338,23 +296,39 @@ def init_map():
             if MODEL_NAME in os.listdir(MODEL_PATH):
                 flood_model = load_models(MODEL_PATH + MODEL_NAME)
             else:
-                print("Training new flood models...")
+                print("No model found, GO train some by running train.py")
+                # print("Training new flood models...")
                 # Train models for all soil types
-                flood_model = train_all_models(soil_types, stationId)
+                # flood_model = train_all_models(soil_types, stationId)
                 # Plot models for available soil types
                 #flood_model.plot_all(save=True)
 
             print("model?")
             # Precompute predictions for all years
+            print(f"Starting predictions on {len(sediment_mercator)} polygons...")
             sediment_with_predictions = sediment_mercator.copy()
             for year in range(0, 2):
+                start_time = time.time()
                 sediment_with_predictions = flood_model.predict_proba(sediment_with_predictions, station_coverage=stations_gdf, year=year)
-                print("Predicted Year ",year)
+                end_time = time.time()
+                prediction_time = end_time - start_time
+                print(f"Predicted Year {year} in {prediction_time:.2f} seconds")
+            
             # Convert to GeoJSON data source
-            print("Predicted all years")
+            print("Converting predictions to GeoJSON...")
             flood_geojson = gdf_to_geojson(sediment_with_predictions)
+            
+            # Debug: Check the size of the predictions GeoJSON payload
+            flood_geojson_size_mb = len(flood_geojson) / (1024 * 1024)
+            print(f"Predictions GeoJSON payload size: {flood_geojson_size_mb:.2f} MB")
+            
+            # Debug: Check if GeoJSON has the expected prediction fields
+            flood_sample = json.loads(flood_geojson)["features"][0] if "features" in json.loads(flood_geojson) else None
+            if flood_sample:
+                print(f"Prediction fields: {[k for k in flood_sample['properties'].keys() if 'prediction' in k]}")
+            
             flood_source = GeoJSONDataSource(geojson=flood_geojson)
-            print("converted to geojson")
+            print("Create Flood Layer")
             # Create color mapper with initial field name for year 0
             color_mapper = linear_cmap(
                 field_name='predictions_0',
@@ -363,7 +337,6 @@ def init_map():
                 high=100  # Predictions are percentages (0-100)
             )
             
-            print("Create Flood Layer")
             # Add flood risk layer
             flood_layer = p.patches(
                 'xs', 'ys', 
@@ -384,7 +357,7 @@ def init_map():
             )
             p.add_layout(color_bar, 'right')
             
-            # Fixed slider callback to properly update the visualization
+            # Fixed slider callback with error handling to properly update the visualization
             year_callback = CustomJS(
                 args=dict(
                     flood_layer=flood_layer,
@@ -394,33 +367,37 @@ def init_map():
                     mapper=color_mapper
                 ),
                 code="""
-                    // Ensure we're in a browser context with a DOM
-                    if (typeof document === 'undefined' || document.body === null) {
-                        console.warn('DOM not ready yet, skipping callback');
-                        return;
+                    try {
+                        // Ensure we're in a browser context with a DOM
+                        if (typeof document === 'undefined' || document.body === null) {
+                            console.warn('DOM not ready yet, skipping callback');
+                            return;
+                        }
+                        
+                        // Get current year from slider
+                        const year = Math.round(slider.value);
+                        console.log('Changing visualization to year:', year);
+                        
+                        // Create the field name for this year's predictions
+                        const field_name = 'predictions_' + year;
+                        
+                        // Need to update the mapper's field name
+                        mapper.field = field_name;
+                        
+                        // Update the layer's glyph
+                        flood_layer.glyph.fill_color = {
+                            ...flood_layer.glyph.fill_color,
+                            field: field_name
+                        };
+                        
+                        // Update the color bar title
+                        color_bar.title = 'Flood Risk (%) - Year ' + year;
+                        
+                        // Force a data source change to trigger redraw
+                        flood_source.change.emit();
+                    } catch(e) {
+                        console.error('Error in year slider callback:', e);
                     }
-                    
-                    // Get current year from slider
-                    const year = Math.round(slider.value);
-                    console.log('Changing visualization to year:', year);
-                    
-                    // Create the field name for this year's predictions
-                    const field_name = 'predictions_' + year;
-                    
-                    // Need to update the mapper's field name
-                    mapper.field = field_name;
-                    
-                    // Update the layer's glyph
-                    flood_layer.glyph.fill_color = {
-                        ...flood_layer.glyph.fill_color,
-                        field: field_name
-                    };
-                    
-                    // Update the color bar title
-                    color_bar.title = 'Flood Risk (%) - Year ' + year;
-                    
-                    // Force a data source change to trigger redraw
-                    flood_source.change.emit();
                 """
             )
             year_slider.js_on_change('value', year_callback)
@@ -435,22 +412,25 @@ def init_map():
                 renderers=[flood_layer]  # Explicitly attach to flood layer
             )
             
-            print("Create hover")
-            # Improved tooltip callback that updates the hover display
+            # Improved tooltip callback with error handling
             hover_callback = CustomJS(
                 args=dict(hover=hover, slider=year_slider),
                 code="""
-                    // Get current year from slider
-                    const year = Math.round(slider.value);
-                    const field = 'predictions_' + year;
-                    
-                    // Update the hover tooltip with the current year
-                    hover.tooltips[2][0] = "Current Prediction (Year " + year + ")";
-                    hover.tooltips[2][1] = "@" + field + "{0.0}%";
-                    
-                    // Force the hover tool to update
-                    hover.change.emit();
-                    console.log("Updated hover tooltip for year: " + year);
+                    try {
+                        // Get current year from slider
+                        const year = Math.round(slider.value);
+                        const field = 'predictions_' + year;
+                        
+                        // Update the hover tooltip with the current year
+                        hover.tooltips[2][0] = "Current Prediction (Year " + year + ")";
+                        hover.tooltips[2][1] = "@" + field + "{0.0}%";
+                        
+                        // Force the hover tool to update
+                        hover.change.emit();
+                        console.log("Updated hover tooltip for year: " + year);
+                    } catch(e) {
+                        console.error('Error in hover callback:', e);
+                    }
                 """
             )
             
@@ -461,7 +441,7 @@ def init_map():
             p.add_tools(hover)
             
         except Exception as e:
-            print(f"Error setting up flood predictions: {e}")
+            print(f"ERROR setting up flood predictions: {e}")
             import traceback
             traceback.print_exc()
     
@@ -482,8 +462,9 @@ def init_map():
         active_layers.append(len(layer_names) - 1)
     
     checkbox = CheckboxGroup(labels=layer_names, active=active_layers)
+    print(f"Initial active layers: {active_layers}")
     
-    # JavaScript callback for layer visibility
+    # JavaScript callback for layer visibility with error handling
     js_args = {'checkbox': checkbox}
     
     if sediment_layer:
@@ -499,28 +480,35 @@ def init_map():
         js_args['flood_layer'] = flood_layer
     
     checkbox_code = """
-        let i = 0;
+        try {
+            let i = 0;
     """
     
     if sediment_layer:
         checkbox_code += """
-        sediment_layer.visible = checkbox.active.includes(i);
-        i++;
+            sediment_layer.visible = checkbox.active.includes(i);
+            i++;
         """
     
     if precipitation_layer:
         checkbox_code += """
-        precipitation_layer.visible = checkbox.active.includes(i);
-        if (typeof station_layer !== 'undefined')
-            station_layer.visible = checkbox.active.includes(i);
-        i++;
+            precipitation_layer.visible = checkbox.active.includes(i);
+            if (typeof station_layer !== 'undefined')
+                station_layer.visible = checkbox.active.includes(i);
+            i++;
         """
     
     if flood_layer:
         checkbox_code += """
-        if (typeof flood_layer !== 'undefined')
-            flood_layer.visible = checkbox.active.includes(i);
+            if (typeof flood_layer !== 'undefined')
+                flood_layer.visible = checkbox.active.includes(i);
         """
+    
+    checkbox_code += """
+        } catch(e) {
+            console.error('Error in checkbox callback:', e);
+        }
+    """
     
     checkbox_callback = CustomJS(args=js_args, code=checkbox_code)
     checkbox.js_on_change('active', checkbox_callback)
