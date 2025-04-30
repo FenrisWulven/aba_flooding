@@ -13,7 +13,7 @@ from bokeh.palettes import Viridis256, Category10
 from bokeh.plotting import figure
 from bokeh.io import output_file, show
 from bokeh.models import GeoJSONDataSource, HoverTool, CheckboxGroup, CustomJS
-from bokeh.models import WMTSTileSource, Column, Slider
+from bokeh.models import WMTSTileSource, Slider
 from bokeh.transform import linear_cmap
 from bokeh.layouts import column
 from shapely.geometry import Polygon
@@ -50,16 +50,10 @@ def load_models(model_path):
                 # Load each station file
                 for station in model.stations:
                     # Try both naming patterns
-                    station_files = [
-                        # os.path.join(stations_dir, f"{station}.joblib"),   # Original pattern
-                        os.path.join(stations_dir, f"station_{station}.joblib")  # Pattern from train.py
-                    ]
-                    
-                    station_file = None
-                    for potential_file in station_files:
-                        if os.path.exists(potential_file):
-                            station_file = potential_file
-                            break
+                    potential_file = os.path.join(stations_dir, f"station_{station}.joblib")  # Pattern from train.py
+
+                    if os.path.exists(potential_file):
+                        station_file = potential_file
                     
                     if station_file:
                         try:
@@ -69,7 +63,7 @@ def load_models(model_path):
                         except Exception as e:
                             print(f"ERROR loading station {station}: {e}")
                     else:
-                        print(f"No file found for station {station}, tried patterns: {station_files}")
+                        print(f"No file found for station {station}")
                 
                 print(f"Loaded {loaded_count} models for {len(model.stations)} stations")
             else:
@@ -96,32 +90,44 @@ def repair_geometries(gdf):
             print(f"Warning: {still_invalid} geometries still invalid after repair")
     return gdf
 
-def init_map():
+def init_map(sjælland=False):
     """Initialize a Bokeh map with terrain data, sediment layers, and flood risk predictions using FloodModel."""
 
     # Load sediment data
-    print("Loading sediment data...")
     try:
-        # Uncomment the line below to use full Denmark dataset
+        print("Loading sediment data...")
         sediment_data = load_terrain_data("Sediment_wgs84.geojson")
-        # Comment out the line below when using full dataset
-        # sediment_data = load_terrain_data("Sediment.geojson")
+
+        # Checks if the map needs to display all of denmark simplified or just sjælland
+        if sjælland:
+            # Create a polygon representing Sjælland (approximate bounds)
+            bounding_polygon = Polygon([
+                (10.8, 54.9),   # Southwest corner
+                (10.8, 56.1),   # Northwest corner
+                (12.6, 56.1),   # Northeast corner
+                (12.6, 54.9),   # Southeast corner
+                (10.8, 54.9)    # Close the polygon
+            ])
+        else:
+            # This cuts off Bornholm (on purpose)
+            bounding_polygon = Polygon([
+            (8.0, 54.5),   # Southwest 
+            (8.0, 57.8),   # Northwest 
+            (13.0, 57.8),  # Northeast 
+            (13.0, 54.5),  # Southeast
+            (8.0, 54.5)    # to close the polygon
+            ])
+        print("Bounding the map")
+        filter_gdf = gpd.GeoDataFrame(geometry=[bounding_polygon], crs="EPSG:4326")
+        sediment_data = gpd.sjoin(sediment_data, filter_gdf, predicate='within')
 
         print(f"Loaded sediment data with CRS: {sediment_data.crs}")
-        print(f"Sediment data size before simplification: {len(sediment_data)} polygons")
         
-        sjaelland_polygon = Polygon([
-            (10.8, 54.9),   # Southwest corner
-            (10.8, 56.1),   # Northwest corner
-            (12.6, 56.1),   # Northeast corner
-            (12.6, 54.9),   # Southeast corner
-            (10.8, 54.9)    # Close the polygon
-        ])
-        
-        print(f"Sediment data size before simplification: {len(sediment_data)} polygons")
-        
-        # Fix: Better CRS comparison and conversion
+        # simplify so it can be loaded
+        tolerance = 50 * (1-sjælland) # simplifying plygon tolerance
+        print(f"Simplify the map to ensure that it can be displayed, simplify by: {tolerance}")
         target_crs = "EPSG:3857"
+
         # Make sure sediment data has correct CRS before filtering
         if sediment_data.crs is None:
             sediment_data.crs = "EPSG:4326"
@@ -129,7 +135,7 @@ def init_map():
             # Simplify geometries before conversion to reduce payload size
             print("Simplifying geometries...")
             sediment_data = sediment_data.copy()
-            sediment_data.geometry = sediment_data.geometry.simplify(tolerance=50)
+            sediment_data.geometry = sediment_data.geometry.simplify(tolerance=tolerance)
             sediment_mercator = sediment_data.to_crs(target_crs)
         elif str(sediment_data.crs).upper() != target_crs:
             print(f"Converting sediment data from {sediment_data.crs} to {target_crs} Web Mercator")
@@ -138,14 +144,14 @@ def init_map():
             # Simplify geometries before conversion to reduce payload size
             print("Simplifying geometries...")
             sediment_data = sediment_data.copy()
-            sediment_data.geometry = sediment_data.geometry.simplify(tolerance=50)
+            sediment_data.geometry = sediment_data.geometry.simplify(tolerance=tolerance)
             sediment_mercator = sediment_data.to_crs(target_crs)
         else:
             print("Sediment data already in Web Mercator projection")
             # Still simplify geometries for better performance
             print("Simplifying geometries...")
             sediment_data = sediment_data.copy()
-            sediment_data.geometry = sediment_data.geometry.simplify(tolerance=50)
+            sediment_data.geometry = sediment_data.geometry.simplify(tolerance=tolerance)
             sediment_mercator = sediment_data
         
         print(f"Sediment data size after simplification: {len(sediment_mercator)} polygons")
@@ -195,7 +201,7 @@ def init_map():
             coverage_geojson = gdf_to_geojson(coverage_mercator)
             coverage_source = GeoJSONDataSource(geojson=coverage_geojson)
             
-            # Add precipitation coverage polygons
+            # Add station coverage polygons
             precipitation_layer = p.patches(
                 'xs', 'ys',
                 source=coverage_source,
@@ -206,7 +212,7 @@ def init_map():
                 legend_label="Precipitation Coverage"
             )
             
-            # Create a hover tool for precipitation areas
+            # Create a hover tool for station areas
             precip_hover = HoverTool(
                 tooltips=[
                     ("Station ID", "@station_id"),
@@ -245,18 +251,7 @@ def init_map():
         print(f"Failed to load precipitation coverage: {e}")
         import traceback
         traceback.print_exc()
-        
-    # Add sediment layer if available
-    print("before sediment layer")
-    # sediment_layer = None
-    # if has_sediment_data:
-    #     sediment_geojson = gdf_to_geojson(sediment_mercator)
-    #     sediment_source = GeoJSONDataSource(geojson=sediment_geojson)
-    #     sediment_layer = p.patches('xs', 'ys', source=sediment_source,
-    #                             fill_color='brown', fill_alpha=0.4,
-    #                             line_color='black', line_width=0.2,
-    #                             legend_label="Sediment")
-
+    
     # Add sediment layer if available
     sediment_layer = None
     if has_sediment_data:
@@ -268,13 +263,8 @@ def init_map():
             geojson_size_mb = len(sediment_geojson) / (1024 * 1024)
             print(f"GeoJSON payload size: {geojson_size_mb:.2f} MB")
             
-            if geojson_size_mb > 50:  # If payload is very large, consider URL option
-                print("Warning: GeoJSON payload is very large. Consider using file-based GeoJSON.")
-                # Option to save and load via URL instead of inlining
-                # os.makedirs("data", exist_ok=True)
-                # with open("data/sediment.geojson", "w") as f:
-                #     f.write(sediment_geojson)
-                # sediment_source = GeoJSONDataSource(url="data/sediment.geojson")
+            if geojson_size_mb > 50:  
+                print("Warning: GeoJSON payload is very large.")
             
             # Debug: Check if GeoJSON has the expected fields
             sample_feature = json.loads(sediment_geojson)["features"][0] if "features" in json.loads(sediment_geojson) else None
@@ -301,19 +291,13 @@ def init_map():
                 flood_model = load_models(MODEL_PATH + MODEL_NAME)
             else:
                 print("No model found, GO train some by running train.py")
-                # print("Training new flood models...")
-                # Train models for all soil types
-                # flood_model = train_all_models(soil_types, stationId)
-                # Plot models for available soil types
-                #flood_model.plot_all(save=True)
 
-            print("model?")
-            # Precompute predictions for all years
+            # Precompute predictions for all years (0-10) and store in GeoDataFrame
             print(f"Starting predictions on {len(sediment_mercator)} polygons...")
             sediment_with_predictions = sediment_mercator.copy()
-            for year in range(0, 2):
+            for year in range(0, 11):
                 start_time = time.time()
-                sediment_with_predictions = flood_model.predict_proba(sediment_with_predictions, station_coverage=stations_gdf, year=year)
+                sediment_with_predictions = flood_model.predict_proba(sediment_with_predictions, station_coverage=coverage_mercator, year=year)
                 end_time = time.time()
                 prediction_time = end_time - start_time
                 print(f"Predicted Year {year} in {prediction_time:.2f} seconds")
@@ -361,7 +345,8 @@ def init_map():
             )
             p.add_layout(color_bar, 'right')
             
-            # Fixed slider callback with error handling to properly update the visualization
+            # Create a slider callback to update the flood layer based on the selected year
+            # Use CustomJS to handle the slider change event
             year_callback = CustomJS(
                 args=dict(
                     flood_layer=flood_layer,
@@ -406,7 +391,7 @@ def init_map():
             )
             year_slider.js_on_change('value', year_callback)
             
-            # Create a single hover tool that will be dynamically updated
+            # Create a single hover tool that should be dynamically updated
             hover = HoverTool(
                 tooltips=[
                     ("Soil Type", "@sediment"),
@@ -416,7 +401,8 @@ def init_map():
                 renderers=[flood_layer]  # Explicitly attach to flood layer
             )
             
-            # Improved tooltip callback with error handling
+            # Tooltip for the hover tool callback
+            # This will be updated dynamically based on the slider value
             hover_callback = CustomJS(
                 args=dict(hover=hover, slider=year_slider),
                 code="""

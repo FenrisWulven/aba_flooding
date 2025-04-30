@@ -77,7 +77,7 @@ def voronoi_finite_polygons_2d(vor, radius=None):
     
     return new_regions, np.asarray(new_vertices)
 
-def create_precipitation_coverage(denmark_gdf):
+def create_precipitation_coverage(denmark_gdf, precipitation_data=None):
     """
     Create Voronoi polygons for precipitation stations that cover Denmark without overlap.
     
@@ -97,6 +97,9 @@ def create_precipitation_coverage(denmark_gdf):
             print("WARNING: No 'stationId' column found, using first column as ID")   
             id_column = station_data.columns[0]  # Use the first column as ID 
         
+        # Make sure percepitation_data.columns are the only stations included
+        station_data = station_data[station_data[id_column].isin(precipitation_data.columns)]
+
         # Find longitude and latitude columns
         lon_col = next((col for col in station_data.columns if col.lower() in ['longitude', 'lon', 'long']), None)
         lat_col = next((col for col in station_data.columns if col.lower() in ['latitude', 'lat']), None)
@@ -203,11 +206,6 @@ def create_precipitation_coverage(denmark_gdf):
         
         # TODO: Add avg_precipitation data to coverage areas if available
         print("Adding avg preciptation to the station data of the polygons...")
-        # load in the precipitation data
-        precipitation_data = pd.read_parquet('data/raw/precipitation_imputed_data.parquet')
-        precipitation_data = precipitation_data.clip(lower=0, upper=100) 
-        # drop nans
-        # precipitation_data.dropna(inplace=True) # inplace means that 
 
         # precipitation_data has columns indexed by station IDs with the mm values
         avg_prec = precipitation_data.mean(axis=0, skipna=True)
@@ -234,12 +232,12 @@ def create_precipitation_coverage(denmark_gdf):
         traceback.print_exc()
         return None, None
 
-def create_full_coverage():
+def create_full_coverage(precipitation_data=None):
     """
     Create coverage areas for precipitation stations across Denmark.
     
     Returns:
-    --------
+    --------    
     tuple: (GeoJSONDataSource, GeoDataFrame, GeoDataFrame)
         Coverage as GeoJSON source - contains geo data in GeoJSON format
         coverage GeoDataFrame      - 
@@ -275,7 +273,7 @@ def create_full_coverage():
 
     # Create station coverage areas
     print("\nCreating station coverage areas")
-    coverage_geojson_gdf, stations_gdf = create_precipitation_coverage(denmark_polygon_gdf)
+    coverage_geojson_gdf, stations_gdf = create_precipitation_coverage(denmark_polygon_gdf, precipitation_data)
     
     if coverage_geojson_gdf is not None and not coverage_geojson_gdf.empty:
         print(f"Successfully created polygon coverage GeoDataFrame with {len(coverage_geojson_gdf)} polygons")
@@ -499,7 +497,7 @@ def calculate_water_on_ground(df, soil_types, absorbtions, station):
     for soil_type in valid_soil_types:
         rate = absorbtions[soil_type] 
         soil_type_data[soil_type] = {
-            'rate': rate,
+            'rate': rate * 1000 * 36 * 0.2, # Unit scaling of the rate from m/s to mm/h
             'wog_array': np.zeros(n),
             'observed': np.zeros(n, dtype=int),
             'tte': np.full(n, n),  # Fill with max value initially
@@ -622,9 +620,6 @@ def load_process_data(coverage_data=None, sediment_data=None):
 
         #https://international.kk.dk/sites/default/files/2021-09/Cloudburst%20Management%20plan%202010.pdf
         # The highest are the 2011 and 2014 cloudbursts, with 2014 possibly peaking around 119 mm. Official records might show around 115 mm.
-
-        #https://international.kk.dk/sites/default/files/2021-09/Cloudburst%20Management%20plan%202010.pdf?utm_source=chatgpt.com
-        # precipitation measured close to 100 mm in one hour.
 
         #https://web.archive.org/web/20140913151609/http://vejret.tv2.dk/artikel/id-32909558:et-af-de-kraftigste-regnvejr-nogensinde.html
         # over 100mm in 24 hours and private measurements for 160mm in 124 hours
@@ -795,7 +790,14 @@ if __name__ == "__main__":
 
     # TODO uncomment this
     # Step 1: Create coverage areas for precipitation stations
-    coverage_geojson_gdf, stations_gdf = create_full_coverage()
+    precipitation_data = pd.read_parquet("data/raw/precipitation_imputed_data.parquet")
+    for column in precipitation_data.columns:
+        if precipitation_data[column].count() < 5000:
+            print(f"Removing column {column} with {precipitation_data[column].count()} non-NaN values")
+            precipitation_data.drop(column, axis=1, inplace=True)
+    # clip
+    precipitation_data = precipitation_data.clip(lower=0, upper=100) # this is already done in the create_precipitation_coverage function
+    coverage_geojson_gdf, stations_gdf = create_full_coverage(precipitation_data)
     # this functions saves the coverage_geojson_gdf to a file called precipitation_coverage.geojson
     if coverage_geojson_gdf is None:
         print("ERROR No valid coverage data created. Attemption to load from file.")

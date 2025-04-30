@@ -15,35 +15,11 @@ def inspect_model(train = False):
     try:
         # Create a FloodModel instance first, then call load with the path parameter
         model = FloodModel()
-        if train:
-            print("Training the model...")
-            if train:
-                
-                # Fix: Pass string filename first, not the model object
-                station_file = "data/processed/survival_data_05005.parquet"
-                station_id = "05005"
-                station, station_models, timing = process_station_file(f"survival_data_{station_id}.parquet", 
-                                                                    os.path.dirname(station_file), 
-                                                                    False)
-                
-                # Only try to add models if they were successfully created
-                if station_models:
-                    for model_key, survival_model in station_models.items():
-                        model.models[model_key] = survival_model
-                    model.stations.append(station)
-                    
-                    # Update available soil types
-                    for model_key in station_models:
-                        soil_type = model_key.split('_')[1]
-                        if soil_type not in model.available_soil_types:
-                            model.available_soil_types.append(soil_type)
-            else:
-                print(f"No models were created for station {station_id}")
-        else:
-            if not os.path.exists(model_path):
-                print(f"Model file not found: {model_path}")
-                return
-            model.load(path=model_path)
+        
+        if not os.path.exists(model_path):
+            print(f"Model file not found: {model_path}")
+            return
+        model.load(path=model_path)
         
         # Inspect specific station
         inspect_station(model, "05005")
@@ -139,7 +115,7 @@ def inspect_station(model, station_id):
 
                                 surv_prob = survival_model.predict_proba(t_years)
                                 # Flood probability is 1-survival probability
-                                flood_prob = (1-surv_prob)*100 if isinstance(surv_prob, (int, float)) else None
+                                flood_prob = (surv_prob)*100 #if isinstance(surv_prob, (int, float)) else None
                                 print(f"    - At {period['value']} {period['unit']}: {flood_prob:.2f}% flood probability" 
                                       if flood_prob is not None else f"    - At {period['value']} {period['unit']}: No valid prediction")
                             else:
@@ -266,11 +242,10 @@ def plot_survival_curves(station_models, station_id):
 
 import pandas as pd
 from lifelines import KaplanMeierFitter, WeibullFitter, ExponentialFitter, LogNormalFitter
-from sksurv.nonparametric import kaplan_meier_estimator
 
 if __name__ == "__main__":
 
-    #inspect_model(True)
+    inspect_model(False)
 
     df = pd.read_parquet("data/processed/survival_data_06136.parquet")
 
@@ -278,18 +253,9 @@ if __name__ == "__main__":
 
     df['06136_HG_observed'] = df['06136_HG_observed'].astype(bool)
 
-    time, survival_prob, conf_int = kaplan_meier_estimator(df['05109_HI_observed'], df['05109_HI_duration'], conf_type="log-log")
-
     # Ensure the directory exists before saving the plot
     output_dir = os.path.join('outputs', 'plots', 'inspect_model')
     os.makedirs(output_dir, exist_ok=True)
-
-    plt.step(time, survival_prob, where="post")
-    plt.fill_between(time, conf_int[0], conf_int[1], alpha=0.25, step="post")
-    plt.ylim(0, 1)
-    plt.ylabel(r"est. probability of survival $\hat{S}(t)$")
-    plt.xlabel("time $t$")
-    plt.savefig(os.path.join(output_dir, "km_plot.png"))
 
     print(df['06136_HG_observed'].value_counts())
     print(df['06136_HG_duration'].describe())
@@ -301,13 +267,6 @@ if __name__ == "__main__":
     else:
         print("No events found! All observations are censored.")
 
-
-    # Try plotting the cumulative hazard (might show the pattern better)
-    plt.figure(figsize=(10, 6))
-    km.plot_cumulative_density()
-    plt.grid(True)
-    plt.title("Cumulative density")
-    plt.savefig('outputs/plots/inspect_model/cumulative_density.png')
 
     # Check for issues in the duration data
     plt.figure(figsize=(10, 6))

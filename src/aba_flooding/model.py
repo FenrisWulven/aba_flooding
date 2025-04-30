@@ -1,6 +1,5 @@
 import pandas as pd
 from lifelines import KaplanMeierFitter, ExponentialFitter
-# import geopandas
 import numpy as np
 import matplotlib.pyplot as plt
 import os
@@ -8,7 +7,6 @@ import numpy as np
 import torch
 import torchtuples as tt
 from sklearn.preprocessing import StandardScaler
-from sklearn_pandas import DataFrameMapper
 from pycox.models import CoxPH
 from pycox.evaluation import EvalSurv
 import joblib
@@ -213,7 +211,18 @@ class SurvivalModel:
         self.units = 'hours'  # Default unit for duration 
     
     def train(self, df, duration_column='duration', event_column='observed'):
-        """Train the survival model on dry spell durations."""
+        """
+        Train the survival model on survival data.
+        
+        Parameters:
+        -----------
+        df : Pandas DataFrame
+            Survival data
+        duration_column : str
+            name of column in df that is duration
+        event_column : str
+            name of column in df that is event
+        """
         if df is None or len(df) == 0:
             raise ValueError("Training data is empty")
             
@@ -223,7 +232,7 @@ class SurvivalModel:
     
     def predict_proba(self, durations):
         """
-        Predict probability of rain occurring by the given duration.
+        Predict probability of flood occurring by the given duration.
         
         Parameters:
         -----------
@@ -237,14 +246,14 @@ class SurvivalModel:
         if not self.is_fitted:
             raise RuntimeError("Model must be trained before making predictions")
             
-        # Convert to array if single value
+        # Convert to array if single value (needed for the lifelines methods)
         if isinstance(durations, (int, float)):
             durations = [durations]
             
-        # Get survival function (probability of remaining dry)
+        # Get survival function
         survival_probs = self.model.predict(durations)
         
-        # Return probability of rain (1 - survival probability)
+        # Return probability of rain
         return 1 - survival_probs
     
     def predict(self, year):
@@ -263,46 +272,18 @@ class SurvivalModel:
         if not self.is_fitted:
             raise RuntimeError("Model must be trained before making predictions")
         
-        # Get the maximum observed duration from the model
-        max_observed = self.model.timeline.max()
-        
         # Calculate duration based on the year
         if self.units == 'hours':
-            # Scale down for better distribution across years
-            # This prevents all predictions from being 100%
-            if year <= 0.1:  # For very short periods
-                duration = year * 365 * 24 * 0.1  # Scale down for short durations
-            elif year <= 1:  # For periods up to a year
-                duration = year * 365 * 24 * 0.2  # Scale down a bit
-            else:  # For longer periods
-                # Use a logarithmic scale to prevent saturation at 100%
-                duration = min(max_observed * (1 + np.log(year)), max_observed)
-        elif self.units == 'days':
-            if year <= 1:
-                duration = year * 365 * 0.5
-            else:
-                duration = min(max_observed * (1 + np.log(year)), max_observed)
-        else:  # years or other units
-            duration = min(year, max_observed)
-            
-        #print(f"Soil type: {self.soil_type}, Year: {year}, Duration: {duration}, Max observed: {max_observed}")
+            duration = year * 365 * 24
         
-        # Get probability and apply a dampening function to avoid 100% predictions
-        # as years increase
-        raw_prob = float(self.predict_proba(duration))
-        
-        # Apply a dampening function for multi-year predictions
-        if year > 1:
-            # Dampened probability that approaches but never quite reaches 100%
-            prob = raw_prob * (1 - 0.1 / year)
-            #print(f"Year {year}: Raw prob {raw_prob:.4f}, dampened to {prob:.4f}")
-        else:
-            prob = raw_prob
+        prob = self.predict_proba(duration)
         
         return prob
     
     def plot(self):
-        """Plot the survival function."""
+        """
+        Plot the survival function.
+        """
         if not self.is_fitted:
             raise RuntimeError("Model must be trained before plotting")
         
@@ -409,7 +390,7 @@ class FloodModel:
             
             # Check if needed columns exist
             if duration_column in survival_df.columns and event_column in survival_df.columns:
-                # Filter out any missing values
+                # Filter out any missing values (is only done here for absolute certainty)
                 valid_data = survival_df[[duration_column, event_column]].dropna()
                 
                 if len(valid_data) > 0:
@@ -521,7 +502,7 @@ class FloodModel:
             print(f"Successfully saved {saved_files} station files and metadata")
             
         else:
-            # Traditional single-file save
+            # Traditional single-file save (not working correctly)
             print(f"Starting to save {len(self.models)} models to {path}...")
             model_data = {
                 'models': self.models,
@@ -659,35 +640,46 @@ class FloodModel:
         --------
         dict : Dictionary of loaded models for this station
         """
-        # Try different filename patterns
-        file_patterns = [
-            os.path.join(stations_dir, f"{station}.joblib"),
-            os.path.join(stations_dir, f"station_{station}.joblib")
-        ]
+        file_path = os.path.join(stations_dir, f"station_{station}.joblib")
         
         loaded_models = {}
-        for file_path in file_patterns:
-            if os.path.exists(file_path):
-                try:
-                    print(f"Loading station models from {file_path}")
-                    station_models = joblib.load(file_path)
-                    
-                    # Add models to the main models dictionary
-                    if isinstance(station_models, dict):
-                        for model_key, model in station_models.items():
-                            self.models[model_key] = model
-                            loaded_models[model_key] = model
-                    
-                    # Return the loaded models
-                    return loaded_models
-                except Exception as e:
-                    print(f"Error loading station file {file_path}: {e}")
+        
+        if os.path.exists(file_path):
+            try:
+                print(f"Loading station models from {file_path}")
+                station_models = joblib.load(file_path)
+                
+                # Add models to the main models dictionary
+                if isinstance(station_models, dict):
+                    for model_key, model in station_models.items():
+                        self.models[model_key] = model
+                        loaded_models[model_key] = model
+                
+                # Return the loaded models
+                return loaded_models
+            except Exception as e:
+                print(f"Error loading station file {file_path}: {e}")
         
         print(f"No valid model file found for station {station} in {stations_dir}")
         return {}
     
     def predict_proba(self, geodata, station_coverage, year):
-        """"""
+        """
+        Calculate the survival for the geographic area covered by geodata at a given year.
+
+        Parameters:
+        -----------
+        geodata : gdf
+            Sediment data
+        station_coverage : gdf
+            Voronoi cover of stations
+        Year : iterable[float] or float
+            The specified year(s) to predict
+        
+        Returns:
+        -----------
+        gdf : geopandas dataframe wiht the predictions as features
+        """
         # Ensure the model is trained
         if not self.is_fitted:
             raise RuntimeError("Model must be trained before making predictions")
@@ -695,21 +687,22 @@ class FloodModel:
         result_geodata = geodata.copy()
         column_name = f'predictions_{year}'
 
-        soil_type_col = 'sediment'
+        # Get the sediment feature in geodata
+        soil_type_col = 'tsym'
         if soil_type_col not in result_geodata.columns:
             # Try to find a suitable column for soil types
             possible_cols = [col for col in result_geodata.columns 
                         if 'soil' in col.lower() or 'type' in col.lower()]
             if possible_cols:
                 soil_type_col = possible_cols[0]
+                print(f"Using '{soil_type_col}' instead of 'tsym' for soil types")
             else:
                 print("Could not find soil type column in geodata")
                 return geodata
-         # Initialize prediction column
+            
+        # Initialize prediction column
         result_geodata[column_name] = None
         
-        # If no station coverage provided, use all available stations with equal weight
-        # Spatial join to find which station coverage area each geometry falls into
         # Ensure both GeoDataFrames have the same CRS
         if result_geodata.crs != station_coverage.crs:
             print(f"Converting station_coverage from {station_coverage.crs} to {result_geodata.crs}")
@@ -726,48 +719,92 @@ class FloodModel:
             else:
                 print("Could not find station ID column in station_coverage")
                 return geodata
-        
-        # Process each row in geodata
+
+        # Process each row in geodata (Each geographical region in sediment data)
         for idx, row in result_geodata.iterrows():
             geometry = row.geometry
             soil_type = row[soil_type_col]
             
-            # Find which station coverage area this geometry intersects with
-            intersecting_stations = station_coverage[station_coverage.intersects(geometry)]
-            
-            if not intersecting_stations.empty:
-                # Extract first element if it's a compound soil type description
-                if isinstance(soil_type, str) and ' ' in soil_type:
-                    simple_type = soil_type.split(' ')[0]
-                else:
-                    simple_type = soil_type
-                    
-                # Get predictions from all intersecting stations and take the average
-                predictions = []
-                for _, station_row in intersecting_stations.iterrows():
-                    station = station_row[station_id_col]
-                    model_key = f"{station}_{simple_type}"
-                    
-                    
-                    
-                    if model_key in self.models:
-                        try:
-                            model = self.models[model_key]
-                            predictions.append(model.predict(year))
-                        except Exception as e:
-                            print(f"Error predicting for {model_key}: {e}")
+            # Skip invalid geometries
+            if geometry is None or not geometry.is_valid:
+                print(f"Invalid geometry at index {idx} - skipping")
+                continue
                 
-                # Calculate the average prediction if we found any models
-                if predictions:
-                    result_geodata.at[idx, column_name] = sum(predictions) / len(predictions)
-                else:
-                    # No models found for this soil type at these stations, assign a default value
-                    default_value = min(0.2 + 0.05 * year, -0.2)
-                    result_geodata.at[idx, column_name] = default_value
+            # Initialize with default value in case all attempts fail (default will here be -0.2 to alway be able to tell)
+            default_value = min(0.2 + 0.05 * year, -0.2)
+            result_geodata.at[idx, column_name] = default_value
+            
+            # Try multiple approaches to find intersecting stations (some don't work all the time)
+            intersecting_stations = None
+            
+            # 1: Direct spatial index query
+            try:
+                # spatial index if available for faster intersection
+                possible_matches_idx = list(station_coverage.sindex.intersection(geometry.bounds))
+                if possible_matches_idx:
+                    possible_matches = station_coverage.iloc[possible_matches_idx]
+                    intersecting_stations = possible_matches[possible_matches.intersects(geometry)]
+            except Exception as e:
+                print(f"Spatial index query failed: {e}")
+            
+            # 2: Buffer the geometry for precision issues
+            if intersecting_stations is None or intersecting_stations.empty:
+                try:
+                    buffered_geometry = geometry.buffer(1)
+                    intersecting_stations = station_coverage[station_coverage.intersects(buffered_geometry)]
+                except Exception as e:
+                    print(f"Small buffer intersection failed: {e}")
+            
+            # 3: Larger buffer if still no matches
+            if intersecting_stations is None or intersecting_stations.empty:
+                try:
+                    buffer_distance = 1000  # 1km buffer
+                    large_buffer = geometry.buffer(buffer_distance)
+                    intersecting_stations = station_coverage[station_coverage.intersects(large_buffer)]
+                except Exception as e:
+                    print(f"Large buffer intersection failed: {e}")
+            
+            # 4: Find nearest stations if no intersection found, last chance and can result in other issues
+            if intersecting_stations is None or intersecting_stations.empty:
+                try:
+                    # Calculate distance to all stations
+                    station_coverage['distance'] = station_coverage.geometry.apply(
+                        lambda g: geometry.distance(g)
+                    )
+                    # Get the closest 3 stations
+                    closest_stations = station_coverage.nsmallest(2, 'distance')
+                    intersecting_stations = closest_stations
+                except Exception as e:
+                    print(f"Nearest station calculation failed: {e}")
+            
+            # If we still don't have any stations, skip to next geometry (default value already set)
+            if intersecting_stations is None or intersecting_stations.empty:
+                if idx % 100 == 0:
+                    print(f"No stations found for geometry {idx} after all attempts")
+                continue
+            
+            # Extract first element if it's a compound soil type description
+            if isinstance(soil_type, str) and ' ' in soil_type:
+                simple_type = soil_type.split(' ')[0]
             else:
-                # Geometry doesn't intersect with any station coverage area
-                default_value = min(0.2 + 0.05 * year, -0.2)
-                result_geodata.at[idx, column_name] = default_value
+                simple_type = soil_type
+            
+            # Get predictions from all intersecting stations and take the average
+            predictions = []
+            for _, station_row in intersecting_stations.iterrows():
+                station = station_row[station_id_col]
+                model_key = f"{station}_{simple_type}"
+
+                if model_key in self.models:
+                    try:
+                        model = self.models[model_key]
+                        predictions.append(model.predict(year))
+                    except Exception as e:
+                        print(f"Error predicting for {model_key}: {e}")
+            
+            # Calculate the average prediction if we found any models
+            if predictions:
+                result_geodata.at[idx, column_name] = sum(predictions) / len(predictions)
     
         # Store raw probability values before percentage conversion
         result_geodata[f'{column_name}_raw'] = result_geodata[column_name].copy()
@@ -777,9 +814,3 @@ class FloodModel:
         
         return result_geodata
 
-
-# Notebook
-# Model predict_proba
-# map
-# 
-#
