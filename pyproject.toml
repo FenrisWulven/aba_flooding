@@ -32,6 +32,9 @@ dependencies = [
   "geopandas>=1.0.1",
   "torch>=2.6.0",
   "fiona>=1.10.1",
+  "geopy>=2.4.1",
+  "pyogrio>=0.10.0",
+  "scikit-survival>=0.24.1",
 ]
 
 #[tool.setuptools.dynamic]
