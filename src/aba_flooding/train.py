@@ -263,13 +263,11 @@ def train_all_models(output_path="models/flood_model.pkl", profile=False, parall
             if isinstance(timing, dict) and 'station' in timing:
                 timing_info['stations'][station] = timing
 
-    # If we've trained models
+    # If we've trained models then 
     if flood_model.models:
         flood_model.is_fitted = True
-        # Remove the save code from here and just calculate timing
         total_time = time.time() - start_time
         timing_info['total'] = total_time
-        # Don't set save_time here since we're not saving
     else:
         print("No models were successfully trained")
         total_time = time.time() - start_time
