@@ -181,3 +181,5 @@ cython_debug/
 lightning_logs/
 
 reports/figures/
+
+models/

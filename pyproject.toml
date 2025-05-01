@@ -28,8 +28,13 @@ dependencies = [
   "pydeck",
   "sklearn-pandas>=2.2.0",
   "shapely>=2.0.7",
-  "pyproj==3.7.1",
-  "geopandas==1.0.0",
+  "transformers",
+  "geopandas>=1.0.1",
+  "torch>=2.6.0",
+  "fiona>=1.10.1",
+  "geopy>=2.4.1",
+  "pyogrio>=0.10.0",
+  "scikit-survival>=0.24.1",
 ]
 
 #[tool.setuptools.dynamic]
@@ -46,3 +51,22 @@ select = ["I", "N", "E", "W", ]
 
 [tool.coverage.run]
 omit = ["tests/*"]
+
+
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cu124", marker = "sys_platform == 'linux' or sys_platform == 'win32'" }
+]
+torchvision = [
+  { index = "pytorch-cu124", marker = "sys_platform == 'linux' or sys_platform == 'win32'" }
+]
+torchaudio = [
+  { index = "pytorch-cu124", marker = "sys_platform == 'linux' or sys_platform == 'win32'" }
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
