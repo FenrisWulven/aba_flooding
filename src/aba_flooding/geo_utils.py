@@ -10,8 +10,6 @@ from pyproj import Transformer
 from shapely.ops import transform
 import fiona
 
-# WIll take the a model and geodata and apply the survival function on the data so it is in geojson format for the map
-
 def get_data_dir():
     """Return path to the raw data directory."""
     current_file = Path(__file__)

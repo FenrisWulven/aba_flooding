@@ -452,7 +452,7 @@ def gather_soil_types(purculation_mapping):
         min = 0.0001 if value['min'] == 0 else value['min']
         max = 0.9999 if value['max'] == 1 else value['max']
             
-        soil_types[key] = (min + max) / 2
+        soil_types[key] = max #(min + max) / 2 # TODO: CHANGE
     return soil_types
 
 ###########################################
@@ -497,7 +497,7 @@ def calculate_water_on_ground(df, soil_types, absorbtions, station):
     for soil_type in valid_soil_types:
         rate = absorbtions[soil_type] 
         soil_type_data[soil_type] = {
-            'rate': rate * 1000 * 360, # Unit scaling of the rate from m/s to mm/h
+            'rate': rate * 1000 * 3600, # Unit scaling of the rate from m/s to mm/h
             'wog_array': np.zeros(n),
             'observed': np.zeros(n, dtype=int),
             'tte': np.full(n, n),  # Fill with max value initially

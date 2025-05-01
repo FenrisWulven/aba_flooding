@@ -514,6 +514,26 @@ def init_map(sjælland=False):
     return layout
 
 if __name__=="__main__":
+    import matplotlib.pyplot as plt
+    # read in the terrain data
+    terrain_data = load_geojson("Sediment_wgs84.geojson")
+    # find the 5 most common soil types by
+    soil_type_column = 'tsym'
+    if 'tsym' not in terrain_data.columns:
+        # Try to find a suitable column for soil types
+        print(f"Available columns in sediment data: {terrain_data.columns.tolist()}")
+        soil_type_columns = [col for col in terrain_data.columns if 'type' in col.lower() or 'sym' in col.lower() or 'soil' in col.lower()]
+        soil_type_column = soil_type_columns[0] if soil_type_columns else None
+
+    plt.figure(figsize=(10, 6))
+    terrain_data[soil_type_column].value_counts().head(5).plot(kind='bar')
+    plt.title("Top 5 Soil Types")
+    plt.xlabel("Soil Type")
+    plt.ylabel("Count")
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig("top_5_soil_types.png")
+    
     p = init_map()
     # Save to an HTML file and display in browser
     output_file("terrain_map.html")
