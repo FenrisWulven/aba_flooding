@@ -497,7 +497,7 @@ def calculate_water_on_ground(df, soil_types, absorbtions, station):
     for soil_type in valid_soil_types:
         rate = absorbtions[soil_type] 
         soil_type_data[soil_type] = {
-            'rate': rate * 1000 * 36 * 0.2, # Unit scaling of the rate from m/s to mm/h
+            'rate': rate * 1000 * 3600, # Unit scaling of the rate from m/s to mm/h
             'wog_array': np.zeros(n),
             'observed': np.zeros(n, dtype=int),
             'tte': np.full(n, n),  # Fill with max value initially
