@@ -520,7 +520,7 @@ def calculate_water_on_ground(df, soil_types, absorbtions, station):
         # wog_window = np.convolve(wog, np.ones(3)/3, mode='same')  # 3-hour window
         # data['observed'] = (wog_window > 5).astype(int)
 
-        data['observed'] = (wog > 5).astype(int) # CHANGE HERE!
+        data['observed'] = (wog > 5).astype(int) # TODO CHANGE HERE!
         
         # Find event indices
         event_indices = np.where(data['observed'] == 1)[0]
@@ -787,8 +787,6 @@ def load_saved_data(file_path="data/processed/survival_data.csv"):
 ###########################################
 
 if __name__ == "__main__":
-
-    # TODO uncomment this
     # Step 1: Create coverage areas for precipitation stations
     precipitation_data = pd.read_parquet("data/raw/precipitation_imputed_data.parquet")
     for column in precipitation_data.columns:
