@@ -518,3 +518,8 @@ if __name__=="__main__":
     # Save to an HTML file and display in browser
     output_file("terrain_map.html")
     show(p)
+
+    p = init_map(sjælland=True)
+    # Save to an HTML file and display in browser
+    output_file("terrain_map_sjaelland.html")
+    show(p)
