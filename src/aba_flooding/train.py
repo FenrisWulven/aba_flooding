@@ -349,7 +349,7 @@ if __name__ == "__main__":
     print("Saving model with split storage...")
     save_start = time.time()
     flood_model.save("models/flood_model.joblib", split_by_station=True)
-    save_time = time.time() - save_start
+    save_time = time.time() - save_start 
     print(f"Model saved in {save_time:.2f} seconds")
     # add save time to timing info
     timing_info['save_time'] = save_time

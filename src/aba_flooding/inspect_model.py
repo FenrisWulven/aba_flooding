@@ -22,7 +22,7 @@ def inspect_model(train = False):
         model.load(path=model_path)
         
         # Inspect specific station
-        inspect_station(model, "05005")
+        inspect_station(model, "05135")
         
         print("\n== Model Summary ==")
         print(f"Number of stations: {len(model.stations)}")
@@ -182,9 +182,7 @@ def plot_survival_curves(station_models, station_id):
     
     # Different time scales to plot
     time_ranges = [
-        {"max": 1, "label": "1 Year", "filename": "1year"},
-        {"max": 5, "label": "5 Years", "filename": "5years"},
-        {"max": 10, "label": "10 Years", "filename": "10years"}
+        {"max": 1, "label": "1 Year", "filename": "1year"}
     ]
     
     # For each time range, create a separate plot
@@ -192,9 +190,9 @@ def plot_survival_curves(station_models, station_id):
         plt.figure(figsize=(10, 6))
         
         # Generate time points (convert to days for x-axis display)
-        t_max = time_range["max"]  # in years
-        t = np.linspace(0.01, t_max, 100)  # 100 points from 0.01 to max years (avoid 0)
-        t_days = t * 365.25  # convert to days for display
+        t_max = 200000  # in hours
+        t = np.linspace(1, t_max, 200)  # 100 points from 0.01 to max years (avoid 0)
+        t_days = t / 24 / 365.25  # Convert to years
         
         soil_types_plotted = 0
         
@@ -212,7 +210,7 @@ def plot_survival_curves(station_models, station_id):
                     survival_probs = [survival_model.predict_proba(time_point) for time_point in t]
                     
                     # Convert to flood probabilities
-                    flood_probs = [1 - prob for prob in survival_probs]
+                    flood_probs = [prob for prob in survival_probs]
                     
                     # Plot the flood probability curve
                     plt.plot(t_days, flood_probs, label=f"Soil: {soil_type}", linewidth=2)
@@ -221,11 +219,11 @@ def plot_survival_curves(station_models, station_id):
                 print(f"  Error plotting model for soil type {soil_type}: {e}")
         
         if soil_types_plotted > 0:
-            plt.xlabel('Time (days)')
+            plt.xlabel('Time (years)')
             plt.ylabel('Flood Probability')
-            plt.title(f'Flood Probability Curves for Station {station_id} ({time_range["label"]})')
+            plt.title(f'Flood Probability Curves for Station {station_id}')
             plt.grid(True, linestyle='--', alpha=0.7)
-            plt.legend()
+            plt.legend(fontsize=8) 
             
             # Save the plot
             filename = f"station_{station_id}_flood_prob_{time_range['filename']}.png"
@@ -251,15 +249,15 @@ if __name__ == "__main__":
 
     print(df.columns)
 
-    df['06136_ML_observed'] = df['06136_ML_observed'].astype(bool)
+    df['06136_FT_observed'] = df['06136_FT_observed'].astype(bool)
 
     # Ensure the directory exists before saving the plot
     output_dir = os.path.join('outputs', 'plots', 'inspect_model')
     os.makedirs(output_dir, exist_ok=True)
 
-    print(df['06136_ML_observed'].value_counts())
-    print(df['06136_ML_duration'].describe())
-    event_rows = df[df['06136_ML_observed'] == 1]
+    print(df['06136_FT_observed'].value_counts())
+    print(df['06136_FT_duration'].describe())
+    event_rows = df[df['06136_FT_observed'] == 1]
     print(f"\nFound {len(event_rows)} events")
     if len(event_rows) > 0:
         print("\nFirst 5 events:")
@@ -270,15 +268,13 @@ if __name__ == "__main__":
 
     # Check for issues in the duration data
     plt.figure(figsize=(10, 6))
-    plt.hist(df['06136_ML_duration'], bins=50) 
+    plt.hist(df['06136_FT_duration'], bins=50) 
     plt.title("Distribution of Duration Values") 
-    plt.savefig('duration_MLst.png')
+    plt.savefig('duration_FTst.png')
 
     plt.figure()
-    plt.plot(df['06136_WOG_ML'])
-    plt.savefig("ss21.png")
+    plt.plot(df['06136_WOG_FT'])
     plt.savefig('outputs/plots/inspect_model/duration_hist.png')
-
     plt.figure()
 
 
@@ -292,79 +288,6 @@ if __name__ == "__main__":
 
     # DIAGNOSTIC SECTION
     print("\n=== DIAGNOSTIC INFORMATION ===")
-    event_rate = df['06136_ML_observed'].mean()
+    event_rate = df['06136_FT_observed'].mean()
     print(f"Event rate: {event_rate:.4f} ({event_rate*100:.2f}%)")
 
-    # SOLUTION 1: Try plotting with CONSISTENT variables
-    plt.figure(figsize=(10, 6))
-    km_tte = KaplanMeierFitter()
-    km_tte.fit(durations=df['06136_ML_TTE'], event_observed=df['06136_ML_observed'])
-    km_tte.plot_cumulative_density()
-    plt.grid(True)
-    plt.title("Cumulative Incidence (using TTE values)")
-    plt.savefig('outputs/plots/inspect_model/cumulative_density_tte.png')
-
-    # SOLUTION 2: Try duration with events correctly marked
-    plt.figure(figsize=(10, 6))
-    km_dur = KaplanMeierFitter()
-    km_dur.fit(durations=df['06136_ML_duration'], event_observed=df['06136_ML_observed'])
-    km_dur.plot_cumulative_density()
-    plt.grid(True)
-    plt.title("Cumulative Incidence (using duration values)")
-    plt.savefig('outputs/plots/inspect_model/cumulative_density_duration.png')
-
-
-    # SOLUTION 4: Check for time window issues
-    evenHI_by_time = df['06136_ML_observed'].rolling(window=1000).mean()
-    plt.figure(figsize=(10, 6))
-    plt.plot(evenHI_by_time)
-    plt.title("Event Rate Over Time (Moving Average)")
-    plt.savefig('outputs/plots/inspect_model/event_rate_time.png')
-
-    # Create sksurv-compatible structured array
-    y = np.zeros(len(df), dtype=[('event', bool), ('time', float)])
-    y['event'] = df['06136_ML_observed'].values
-    y['time'] = df['06136_ML_duration'].values
-
-    print("\nEvent time analysis:")
-    event_durations = df[df['06136_ML_observed'] == 1]['06136_ML_duration'].describe()
-    print(f"Event durations: {event_durations}")
-    print(f"Max duration overall: {df['06136_ML_duration'].max()}")
-    print(f"Events at max duration: {sum((df['06136_ML_observed'] == 1) & (df['06136_ML_duration'] == df['06136_ML_duration'].max()))}")
-    
-
-    test = WeibullFitter()
-    test.fit(df['06136_ML_duration'], df['06136_ML_observed'])
-    plt.figure(figsize=(10, 6))
-    test.plot_cumulative_density()
-    plt.grid(True)
-    plt.title("Cumulative Incidence (Weibull)")
-    plt.savefig(os.path.join('outputs', 'plots', 'inspect_model', 'cumulative_density_weibull.png'))
-    print(f"Weibull parameters: {test.lambda_}, {test.rho_}")
-    print(f"Weibull median survival time: {test.median_survival_time_}")
-    print(f"Weibull AIC: {test.AIC_}")
-    print(f"Weibull BIC: {test.BIC_}")
-
-    test = ExponentialFitter()
-    test.fit(df['06136_ML_duration'], df['06136_ML_observed'])
-    plt.figure(figsize=(10, 6))
-    test.plot_cumulative_density()
-    plt.grid(True)
-    plt.title("Cumulative Incidence (Exponential)")
-    plt.savefig(os.path.join('outputs', 'plots', 'inspect_model', 'cumulative_density_exponential.png'))
-    print(f"Exponential parameters: {test.lambda_}")
-    print(f"Exponential median survival time: {test.median_survival_time_}")
-    print(f"Exponential AIC: {test.AIC_}")
-    print(f"Exponential BIC: {test.BIC_}")
-
-    test = LogNormalFitter()
-    test.fit(df['06136_ML_duration'], df['06136_ML_observed'])
-    plt.figure(figsize=(10, 6))
-    test.plot_cumulative_density()
-    plt.grid(True)
-    plt.title("Cumulative Incidence (LogNormal)")
-    plt.savefig(os.path.join('outputs', 'plots', 'inspect_model', 'cumulative_density_lognormal.png'))
-    print(f"LogNormal parameters: {test.mu_}, {test.sigma_}")
-    print(f"LogNormal median survival time: {test.median_survival_time_}")
-    print(f"LogNormal AIC: {test.AIC_}")
-    print(f"LogNormal BIC: {test.BIC_}")

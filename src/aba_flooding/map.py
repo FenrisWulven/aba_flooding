@@ -301,7 +301,7 @@ def init_map(sjælland=False):
                 end_time = time.time()
                 prediction_time = end_time - start_time
                 print(f"Predicted Year {year} in {prediction_time:.2f} seconds")
-            
+                
             # Convert to GeoJSON data source
             print("Converting predictions to GeoJSON...")
             flood_geojson = gdf_to_geojson(sediment_with_predictions)

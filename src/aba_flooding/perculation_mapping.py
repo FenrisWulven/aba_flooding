@@ -135,7 +135,7 @@ percolation_rates_updated = {
     "DL": {
       "soil_type": "Meltwater Clay",
       "min": 1.00E-10,
-      "max": 5.00E-08,
+      "max": 5.00E-07,
       # Matches Inorganic Clay, Low Plasticity; aligns with HEC-RAS Documentation.
     },
     "DS": {
@@ -219,7 +219,7 @@ percolation_rates_updated = {
     "FL": {
       "soil_type": "Freshwater Clay",
       "min": 8.00E-13,
-      "max": 2.00E-09,
+      "max": 5.00E-09,
       # Matches Marine Clay, Unweathered; very low permeability.
     },
     "FP": {
@@ -237,7 +237,7 @@ percolation_rates_updated = {
     "FT": {
       "soil_type": "Freshwater Peat",
       "min": 5.00E-10,
-      "max": 1.00E-07,
+      "max": 2.00E-07,
       # Matches Organic Clay, High Plasticity; similar to HP.
     },
     "FV": {
@@ -291,7 +291,7 @@ percolation_rates_updated = {
     "HL": {
       "soil_type": "Saltwater Clay",
       "min": 8.00E-13,
-      "max": 2.00E-09,
+      "max": 4.00E-09,
       # Matches Marine Clay, Unweathered; aligns with HEC-RAS Documentation.
     },
     "HP": {
