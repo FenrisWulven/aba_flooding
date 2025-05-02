@@ -268,10 +268,54 @@ def train_all_models(output_path="models/flood_model.pkl", profile=False, parall
                 if isinstance(timing, dict) and 'station' in timing:
                     timing_info['stations'][station] = timing
     else:
+        i = 0
         # Process files sequentially
         for file in station_files:
             station, models, timing, station_c_cores, station_AIC, station_logLike,station_brier = process_station_file(file, processed_data_path, profile)
-            
+            i += 1
+            if i % 10 == 0:
+                if flood_model.c_scores:
+                    # Flatten the nested dictionary structure
+                    all_c_scores = []
+                    for station_scores in flood_model.c_scores.values():
+                        all_c_scores.extend(station_scores.values())
+                    
+                    if all_c_scores:
+                        avg_c_score = sum(all_c_scores) / len(all_c_scores)
+                        print(f"Average c-index: {avg_c_score:.4f}")
+
+                if flood_model.AIC:
+                    # Flatten the nested dictionary structure
+                    all_aics = []
+                    for station_aics in flood_model.AIC.values():
+                        all_aics.extend(station_aics.values())
+                    
+                    if all_aics:
+                        avg_AIC = sum(all_aics) / len(all_aics)
+                        print(f"Average AIC: {avg_AIC:.4f}")
+
+                if flood_model.logLike:
+                    # Flatten the nested dictionary structure
+                    all_log_likes = []
+                    for station_log_likes in flood_model.logLike.values():
+                        all_log_likes.extend(station_log_likes.values())
+                    
+                    if all_log_likes:
+                        avg_logLike = sum(all_log_likes) / len(all_log_likes)
+                        print(f"Average log-likelihood: {avg_logLike:.4f}")
+
+                if flood_model.brier:
+                    # Flatten the nested dictionary structure
+                    all_briers = []
+                    for station_briers in flood_model.brier.values():
+                        all_briers.extend(station_briers.values())
+                    
+                    if all_briers:
+                        avg_brier = sum(all_briers) / len(all_briers)
+                        print(f"Average brier score: {avg_brier:.4f}")
+                else:
+                    print("No performance metrics available")
+
             if models:
                 # Add all models to the main flood model
                 for model_key, model in models.items():
@@ -313,21 +357,47 @@ def train_all_models(output_path="models/flood_model.pkl", profile=False, parall
         total_time = time.time() - start_time
         timing_info['total'] = total_time
     
-    # print average c-score
     if flood_model.c_scores:
-        avg_c_score = sum(flood_model.c_scores.values()) / len(flood_model.c_scores)
-        print(f"Average c-index: {avg_c_score:.4f}")
+        # Flatten the nested dictionary structure
+        all_c_scores = []
+        for station_scores in flood_model.c_scores.values():
+            all_c_scores.extend(station_scores.values())
+        
+        if all_c_scores:
+            avg_c_score = sum(all_c_scores) / len(all_c_scores)
+            print(f"Average c-index: {avg_c_score:.4f}")
+
     if flood_model.AIC:
-        avg_AIC = sum(flood_model.AIC.values()) / len(flood_model.AIC)
-        print(f"Average AIC: {avg_AIC:.4f}")
+        # Flatten the nested dictionary structure
+        all_aics = []
+        for station_aics in flood_model.AIC.values():
+            all_aics.extend(station_aics.values())
+        
+        if all_aics:
+            avg_AIC = sum(all_aics) / len(all_aics)
+            print(f"Average AIC: {avg_AIC:.4f}")
+
     if flood_model.logLike:
-        avg_logLike = sum(flood_model.logLike.values()) / len(flood_model.logLike)
-        print(f"Average log-likelihood: {avg_logLike:.4f}")
+        # Flatten the nested dictionary structure
+        all_log_likes = []
+        for station_log_likes in flood_model.logLike.values():
+            all_log_likes.extend(station_log_likes.values())
+        
+        if all_log_likes:
+            avg_logLike = sum(all_log_likes) / len(all_log_likes)
+            print(f"Average log-likelihood: {avg_logLike:.4f}")
+
     if flood_model.brier:
-        avg_brier = sum(flood_model.brier.values()) / len(flood_model.brier)
-        print(f"Average brier score: {avg_brier:.4f}")
+        # Flatten the nested dictionary structure
+        all_briers = []
+        for station_briers in flood_model.brier.values():
+            all_briers.extend(station_briers.values())
+        
+        if all_briers:
+            avg_brier = sum(all_briers) / len(all_briers)
+            print(f"Average brier score: {avg_brier:.4f}")
     else:
-        print("No c-scores available")
+        print("No performance metrics available")
 
     return flood_model, timing_info
 
