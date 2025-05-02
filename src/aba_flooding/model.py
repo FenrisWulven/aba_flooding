@@ -1,5 +1,5 @@
 import pandas as pd
-from lifelines import KaplanMeierFitter, ExponentialFitter
+from lifelines import KaplanMeierFitter, ExponentialFitter, WeibullAFTFitter
 import numpy as np
 import matplotlib.pyplot as plt
 import os
@@ -10,6 +10,8 @@ from sklearn.preprocessing import StandardScaler
 from pycox.models import CoxPH
 from pycox.evaluation import EvalSurv
 import joblib
+from lifelines.utils import concordance_index
+
 
 class SurivalDeepCoxModel:
     """
@@ -225,8 +227,11 @@ class SurvivalModel:
         """
         if df is None or len(df) == 0:
             raise ValueError("Training data is empty")
-            
-        self.model.fit(durations=df[duration_column], event_observed=df[event_column])
+        
+        if self.model._class_name == 'WeibullAFTFitter':
+            self.model.fit(df, duration_column, event_column)
+        else:
+            self.model.fit(durations=df[duration_column], event_observed=df[event_column])
         self.is_fitted = True
         return self
     
@@ -295,7 +300,7 @@ class SurvivalModel:
         plt.grid()
         plt.savefig(f"{self.soil_type}_survival_function.png")
 
-    def c_index(self, df):
+    def score(self, df):
         """
         Calculate the concordance index for the model.
         
@@ -311,14 +316,51 @@ class SurvivalModel:
         Returns:
         --------
         float : Concordance index
-        """
+        """    
         if not self.is_fitted:
             raise RuntimeError("Model must be trained before calculating c-index")
+        if df is None or len(df) == 0:
+            raise ValueError("Dataframe is empty")
+        if 'duration' not in df.columns or 'observed' not in df.columns:
+            raise ValueError("Dataframe must contain 'duration' and 'observed' columns")
+        # Calculate metrics
         
-        # Calculate concordance index
-        c_index = self.model.score(df, scoring_method='concordance_index')
+        # smaller median -> higher risk, so we take negative
+        # pseudo-risk: cumulative hazard at each observed time (for exponential)
+        # risk_score = self.model.lambda_ * durations # For Exponential
+        if self.model._class_name == 'WeibullAFTFitter':
+            risk_score = - self.model.predict_median(df)
+        else:
+            risk_score = self.model.lambda_ * df['duration'] # For Exponential
         
-        return c_index
+        c_index = concordance_index(df['duration'], risk_score, df['observed'])
+
+        # Brier score (mean squared error for survial functions) 1 year time horizon
+        t0 = 1 * 365 * 24  # 1 year in hours
+        if self.model._class_name == 'WeibullAFTFitter':
+            S_hat = self.model.predict_survival_function(df,times=[t0])
+        else:
+            S_hat = np.exp(- self.model.lambda_ * t0)
+            S_hat = pd.Series(S_hat, index=df.index, dtype=float)
+
+        Y_t0 = (df["duration"] > t0).astype(int) # I(T > t0)
+        brier_t0 = np.mean((S_hat.values - Y_t0.values)**2)
+
+        metrics = {
+            # Log-likelihood
+            'log_likelihood': self.model.log_likelihood_,
+            
+            # AIC - Akaike Information Criterion
+            'AIC': self.model.AIC_,
+
+            # Concordance index
+            'concordance_index': c_index,
+
+            # Brier Score for 1 year:
+            'brier_score': brier_t0
+        }      
+        
+        return metrics
 
     def save(self, path):
         """
@@ -386,6 +428,9 @@ class FloodModel:
         self.stations = []
         self.available_soil_types = []
         self.c_scores = {}
+        self.AIC = {}
+        self.logLike = {}
+        self.brier = {}
     
     def add_station(self, station, survival_df, soiltypes):
         """

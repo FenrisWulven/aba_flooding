@@ -59,6 +59,9 @@ def process_station_file(file, processed_data_path, profile=False):
         # Create a dictionary for all survival models within the station
         station_models = {}
         station_cscores = {}
+        station_AIC = {}
+        station_logLike = {}
+        station_brier = {}
         
         # Run profiling if enabled
         if profile:
@@ -132,8 +135,19 @@ def process_station_file(file, processed_data_path, profile=False):
                         model_key = f"{station}_{soil_type}"
                         station_models[model_key] = model
                         # Add c-scores
-                        station_cscores[model_key] = model.c_index(valid_data[duration_column])
-                        print(f"Model {model_key} trained with c-index: {station_cscores[model_key].c_score:.4f}")
+                        metrics = model.score(valid_data.rename(columns={
+                                duration_column: 'duration',
+                                event_column: 'observed'
+                            }))
+                        station_cscores[model_key] = metrics['concordance_index']
+                        station_AIC[model_key] = metrics['AIC']
+                        station_logLike[model_key] = metrics['log_likelihood']
+                        station_brier[model_key] = metrics['brier_score']
+                        # Print c-index for each model
+                        print(f"Model {model_key} trained with c-index: {station_cscores[model_key]:.4f}")
+                        print(f"AIC: {station_AIC[model_key]:.4f}")
+                        print(f"Log-Likelihood: {station_logLike[model_key]:.4f}")
+                        print(f"Brier Score: {station_brier[model_key]:.4f}")
 
             
             train_time = time.time() - train_start_time
@@ -152,13 +166,13 @@ def process_station_file(file, processed_data_path, profile=False):
         
         print(f"Station {station}: {station_time:.2f}s (Load: {load_time:.2f}s, Train: {station_time - load_time:.2f}s)")
         
-        return station, station_models, timing, station_cscores
+        return station, station_models, timing, station_cscores, station_AIC, station_logLike, station_brier
         
     except Exception as e:
         print(f"Error processing station file {file}: {e}")
         import traceback
         traceback.print_exc()
-        return file, None, {'status': 'error', 'error': str(e)}, None
+        return file, None, {'status': 'error', 'error': str(e)}, None, None, None, None
 
 ##########################################
 ## TRAINING ALL MODELS FOR ALL STATIONS ##
@@ -256,19 +270,28 @@ def train_all_models(output_path="models/flood_model.pkl", profile=False, parall
     else:
         # Process files sequentially
         for file in station_files:
-            station, models, timing, stationcScores = process_station_file(file, processed_data_path, profile)
+            station, models, timing, station_c_cores, station_AIC, station_logLike,station_brier = process_station_file(file, processed_data_path, profile)
             
             if models:
                 # Add all models to the main flood model
                 for model_key, model in models.items():
                     flood_model.models[model_key] = model
                 
-                if stationcScores:
+                if station_c_cores:
                     # Add c-scores to the model
-                    flood_model.c_scores[station] = stationcScores                
+                    flood_model.c_scores[station] = station_c_cores      
+                if station_AIC:
+                    # Add AIC to the model
+                    flood_model.AIC[station] = station_AIC
+                if station_logLike:
+                    # Add log-likelihood to the model
+                    flood_model.logLike[station] = station_logLike
                 # Update station list if not already there
                 if station not in flood_model.stations:
                     flood_model.stations.append(station)
+                if station_brier:
+                    # Add brier score to the model
+                    flood_model.brier[station] = station_brier
                 
                 # Update soil types
                 for model_key in models:
@@ -294,6 +317,15 @@ def train_all_models(output_path="models/flood_model.pkl", profile=False, parall
     if flood_model.c_scores:
         avg_c_score = sum(flood_model.c_scores.values()) / len(flood_model.c_scores)
         print(f"Average c-index: {avg_c_score:.4f}")
+    if flood_model.AIC:
+        avg_AIC = sum(flood_model.AIC.values()) / len(flood_model.AIC)
+        print(f"Average AIC: {avg_AIC:.4f}")
+    if flood_model.logLike:
+        avg_logLike = sum(flood_model.logLike.values()) / len(flood_model.logLike)
+        print(f"Average log-likelihood: {avg_logLike:.4f}")
+    if flood_model.brier:
+        avg_brier = sum(flood_model.brier.values()) / len(flood_model.brier)
+        print(f"Average brier score: {avg_brier:.4f}")
     else:
         print("No c-scores available")
 
