@@ -823,7 +823,7 @@ if __name__ == "__main__":
     load_process_data(coverage_data=coverage_geojson_gdf, sediment_data=sedimentCoverage)
 
     # Step 4: TESTING - Load and display sample processed data for a specific station
-    station_id = '06058'  # Example station ID
+    station_id = '05085'  # Example station ID
     df = load_saved_data(f'data/processed/survival_data_{station_id}.csv')
     if df is not None:
         print(f"\nSample data for station {station_id}:")
