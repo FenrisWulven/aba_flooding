@@ -26,7 +26,7 @@ def analyze_wog_sensitivity(station_id=None):
     # Dictionary to store results
     all_results = {}
     
-    # Thresholds to test
+    # Thresholds
     thresholds = [1, 2, 3, 5, 7, 10, 15, 20, 25, 30]
     
     for file_path in data_files:
