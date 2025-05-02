@@ -206,7 +206,7 @@ class SurivalDeepCoxModel:
 
 class SurvivalModel:
     def __init__(self, soil_type='clay'):
-        self.model = ExponentialFitter()
+        self.model = KaplanMeierFitter()
         self.soil_type = soil_type
         self.station = None  # Placeholder for station data
         self.is_fitted = False
@@ -327,11 +327,12 @@ class SurvivalModel:
         
         # smaller median -> higher risk, so we take negative
         # pseudo-risk: cumulative hazard at each observed time (for exponential)
-        # risk_score = self.model.lambda_ * durations # For Exponential
         if self.model._class_name == 'WeibullAFTFitter':
             risk_score = - self.model.predict_median(df)
-        else:
+        elif self.model._class_name == 'ExponentialFitter':
             risk_score = self.model.lambda_ * df['duration'] # For Exponential
+        else: 
+            risk_score = np.ones(len(df))
         
         c_index = concordance_index(df['duration'], risk_score, df['observed'])
 
@@ -339,19 +340,29 @@ class SurvivalModel:
         t0 = 1 * 365 * 24  # 1 year in hours
         if self.model._class_name == 'WeibullAFTFitter':
             S_hat = self.model.predict_survival_function(df,times=[t0])
-        else:
+        elif self.model._class_name == 'ExponentialFitter':
             S_hat = np.exp(- self.model.lambda_ * t0)
+            S_hat = pd.Series(S_hat, index=df.index, dtype=float)
+        else:
+            S_hat = self.model.predict(t0)
             S_hat = pd.Series(S_hat, index=df.index, dtype=float)
 
         Y_t0 = (df["duration"] > t0).astype(int) # I(T > t0)
         brier_t0 = np.mean((S_hat.values - Y_t0.values)**2)
 
+        if self.model._class_name == 'KaplanMeierFitter':
+            loglike = 0
+            AIC = 0
+        else:
+            loglike = self.model.log_likelihood_
+            AIC = self.model.AIC_
+
         metrics = {
             # Log-likelihood
-            'log_likelihood': self.model.log_likelihood_,
+            'log_likelihood': loglike,
             
             # AIC - Akaike Information Criterion
-            'AIC': self.model.AIC_,
+            'AIC': AIC,
 
             # Concordance index
             'concordance_index': c_index,

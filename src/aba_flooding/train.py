@@ -143,11 +143,6 @@ def process_station_file(file, processed_data_path, profile=False):
                         station_AIC[model_key] = metrics['AIC']
                         station_logLike[model_key] = metrics['log_likelihood']
                         station_brier[model_key] = metrics['brier_score']
-                        # Print c-index for each model
-                        print(f"Model {model_key} trained with c-index: {station_cscores[model_key]:.4f}")
-                        print(f"AIC: {station_AIC[model_key]:.4f}")
-                        print(f"Log-Likelihood: {station_logLike[model_key]:.4f}")
-                        print(f"Brier Score: {station_brier[model_key]:.4f}")
 
             
             train_time = time.time() - train_start_time
