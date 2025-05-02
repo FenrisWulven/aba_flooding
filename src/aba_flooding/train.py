@@ -58,6 +58,7 @@ def process_station_file(file, processed_data_path, profile=False):
         
         # Create a dictionary for all survival models within the station
         station_models = {}
+        station_cscores = {}
         
         # Run profiling if enabled
         if profile:
@@ -112,6 +113,7 @@ def process_station_file(file, processed_data_path, profile=False):
                 # Check if columns exist (ensure that everything worked so far)
                 if duration_column in survival_df.columns and event_column in survival_df.columns:
                     valid_data = survival_df[[duration_column, event_column]].dropna()
+                    valid_data[duration_column] = valid_data[duration_column].clip(lower=0.001)
                     
                     if len(valid_data) > 0:
                         # Create and train the model
@@ -129,6 +131,10 @@ def process_station_file(file, processed_data_path, profile=False):
                         # Add to our local models dictionary
                         model_key = f"{station}_{soil_type}"
                         station_models[model_key] = model
+                        # Add c-scores
+                        station_cscores[model_key] = model.c_index(valid_data[duration_column])
+                        print(f"Model {model_key} trained with c-index: {station_cscores[model_key].c_score:.4f}")
+
             
             train_time = time.time() - train_start_time
         
@@ -146,13 +152,13 @@ def process_station_file(file, processed_data_path, profile=False):
         
         print(f"Station {station}: {station_time:.2f}s (Load: {load_time:.2f}s, Train: {station_time - load_time:.2f}s)")
         
-        return station, station_models, timing
+        return station, station_models, timing, station_cscores
         
     except Exception as e:
         print(f"Error processing station file {file}: {e}")
         import traceback
         traceback.print_exc()
-        return file, None, {'status': 'error', 'error': str(e)}
+        return file, None, {'status': 'error', 'error': str(e)}, None
 
 ##########################################
 ## TRAINING ALL MODELS FOR ALL STATIONS ##
@@ -250,13 +256,16 @@ def train_all_models(output_path="models/flood_model.pkl", profile=False, parall
     else:
         # Process files sequentially
         for file in station_files:
-            station, models, timing = process_station_file(file, processed_data_path, profile)
+            station, models, timing, stationcScores = process_station_file(file, processed_data_path, profile)
             
             if models:
                 # Add all models to the main flood model
                 for model_key, model in models.items():
                     flood_model.models[model_key] = model
                 
+                if stationcScores:
+                    # Add c-scores to the model
+                    flood_model.c_scores[station] = stationcScores                
                 # Update station list if not already there
                 if station not in flood_model.stations:
                     flood_model.stations.append(station)
@@ -280,6 +289,13 @@ def train_all_models(output_path="models/flood_model.pkl", profile=False, parall
         print("No models were successfully trained")
         total_time = time.time() - start_time
         timing_info['total'] = total_time
+    
+    # print average c-score
+    if flood_model.c_scores:
+        avg_c_score = sum(flood_model.c_scores.values()) / len(flood_model.c_scores)
+        print(f"Average c-index: {avg_c_score:.4f}")
+    else:
+        print("No c-scores available")
 
     return flood_model, timing_info
 

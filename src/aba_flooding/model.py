@@ -295,6 +295,31 @@ class SurvivalModel:
         plt.grid()
         plt.savefig(f"{self.soil_type}_survival_function.png")
 
+    def c_index(self, df):
+        """
+        Calculate the concordance index for the model.
+        
+        Parameters:
+        -----------
+        df : Pandas DataFrame
+            Survival data
+        duration_column : str
+            name of column in df that is duration
+        event_column : str
+            name of column in df that is event
+            
+        Returns:
+        --------
+        float : Concordance index
+        """
+        if not self.is_fitted:
+            raise RuntimeError("Model must be trained before calculating c-index")
+        
+        # Calculate concordance index
+        c_index = self.model.score(df, scoring_method='concordance_index')
+        
+        return c_index
+
     def save(self, path):
         """
         Save the fitted Kaplan-Meier model to disk.
@@ -360,6 +385,7 @@ class FloodModel:
         self.soil_types = ["DG - Meltwater gravel", "DS - Meltwater sand"]
         self.stations = []
         self.available_soil_types = []
+        self.c_scores = {}
     
     def add_station(self, station, survival_df, soiltypes):
         """
@@ -813,4 +839,3 @@ class FloodModel:
         result_geodata[column_name] = result_geodata[column_name] * 100
         
         return result_geodata
-
