@@ -21,7 +21,7 @@ os.makedirs(dist_dir, exist_ok=True)
 station = "05135"
 df_original = pd.read_parquet(f"data/processed/survival_data_{station}.parquet")
 # Only take the most recent 40,000 rows to speed up training time (roughly 3 years of data)
-df = df_original.iloc[-70000:]
+df = df_original.iloc[-50000:]
 df = df_original.copy()
 print(f"Number of columns: {len(df.columns)}")
 
@@ -40,7 +40,9 @@ print(f"Length of soils after removing non-applicable and outlier: {len(raw_soil
 # Limit the soils so they minimum have 3% of observed == 1 and max 20%
 all_soils = True
 if all_soils:
-    soils = raw_soils[6:9]
+    # index 4 and 9 specifially
+    soils = raw_soils
+    #soils = [raw_soils[4], raw_soils[9]]
 else:
     soils = [s for s in raw_soils
              if df[f"{station}_{s}_observed"].sum() > 1
@@ -126,6 +128,7 @@ clip_upper = min(top5[-2], 8760) if len(top5) > 1 else 8760
 print(f"Clipping TTE to lower=1, upper={clip_upper}")
 df['TTE'] = df['TTE'].clip(lower=1, upper=clip_upper)
 
+print(f"Computing covariates - rolling averages")
 # Add rolling averages for 6h, 12h, 24h, 72h, 168h
 for win in (6, 12, 24, 72, 168):
     df[f"WOG_{win}h"] = (
@@ -151,6 +154,19 @@ df['perc_rate'] = df['soil_type'].map(soil_perc)
 
 # Save processed dataframe
 df.to_csv(f"data/processed/dp_survival_data_{station}.csv", index=False)
+# load csv
+# df = pd.read_csv(f"data/processed/dp_survival_data_{station}.csv")
+
+tte = df['TTE']
+# Create histogram of TTE values for events
+plt.figure(figsize=(10, 5))
+plt.hist(tte, bins=30, alpha=0.7)
+plt.title('Distribution of Time-to-Event (TTE) for Observed Events')
+plt.xlabel('Time to Event (hours)')
+plt.ylabel('Frequency')
+plt.grid(True, alpha=0.3)
+plt.savefig(f"reports/figures/tte_distribution_for_events_{station}.png", dpi=150)
+plt.show()
 
 print("Dataframe head\n", df.head())
 print(f"Unique values of soil types: {df['soil_type'].nunique()}")
@@ -208,7 +224,7 @@ print("Starting training on station 05005 with WOG only…")
 model.fit(
     X_train,
     (durations_train, events_train),
-    epochs=20,  # Increased epochs with early stopping
+    epochs=10,  # Increased epochs with early stopping
     batch_size=256,
     verbose=True,
     val_data=(X_val, (durations_val, events_val)),
@@ -314,7 +330,7 @@ try:
             title=f"Deep-CoxPH Survival by Soil (Station {station})",
             xlabel="Time (h)", ylabel="Survival Probability"
         )
-        ax.set_xlim(0, surv.index.max() if not surv.index.empty else clip_upper)
+        #ax.set_xlim(0, surv.index.max() if not surv.index.empty else clip_upper)
         ax.grid(True)
         plt.legend(title="Soil", bbox_to_anchor=(1, 1))
         plt.tight_layout()
@@ -335,7 +351,7 @@ try:
             title=f"Deep-CoxPH Failure Probability by Soil (Station {station})",
             xlabel="Time (h)", ylabel="Failure Probability"
         )
-        ax.set_xlim(0, surv.index.max() if not surv.index.empty else clip_upper)
+        #ax.set_xlim(0, surv.index.max() if not surv.index.empty else clip_upper)
         ax.grid(True)
         plt.legend(title="Soil", bbox_to_anchor=(1, 1))
         plt.tight_layout()
@@ -358,7 +374,7 @@ try:
             plt.title(f"Station {station} — Baseline Survival Curve (WOG only)")
             plt.xlabel("Time to next heavy WOG event (hours)")
             plt.ylabel("Survival Probability")
-            plt.xlim(0, clip_upper)
+            # plt.xlim(0, clip_upper)
             plt.grid(True)
             out_dir = "reports/figures"
             os.makedirs(out_dir, exist_ok=True)
@@ -376,19 +392,19 @@ finally:
     plt.close()
 
 # Evaluate model
-t_1y = min(8760, clip_upper)
-ev = EvalSurv(surv, durations, events, censor_surv='km')
-c_index = ev.concordance_td()
-brier_1y = ev.brier_score(taus=[t_1y])[0]
-time_grid = np.linspace(0, t_1y, 100)
-ibs_1y = ev.integrated_brier_score(time_grid)
-print(f"Concordance index: {c_index:.4f}")
-print(f"Brier score at {t_1y} hours: {brier_1y:.4f}")
-print(f"Integrated Brier Score (0–{t_1y} h): {ibs_1y:.4f}")
+# t_1y = min(8760, clip_upper)
+# ev = EvalSurv(surv, durations, events, censor_surv='km')
+# c_index = ev.concordance_td()
+# brier_1y = ev.brier_score(taus=[t_1y])[0]
+# time_grid = np.linspace(0, t_1y, 100)
+# ibs_1y = ev.integrated_brier_score(time_grid)
+# print(f"Concordance index: {c_index:.4f}")
+# print(f"Brier score at {t_1y} hours: {brier_1y:.4f}")
+# print(f"Integrated Brier Score (0–{t_1y} h): {ibs_1y:.4f}")
 
-# Inspect survival curves
-print(f"Shape of surv: {surv.shape}")
-print("\nFirst 5 survival curves:")
-print(surv.head())
-print("\nLast 5 survival curves:")
-print(surv.tail())
+# # Inspect survival curves
+# print(f"Shape of surv: {surv.shape}")
+# print("\nFirst 5 survival curves:")
+# print(surv.head())
+# print("\nLast 5 survival curves:")
+# print(surv.tail())
